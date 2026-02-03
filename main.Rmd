@@ -1,0 +1,231 @@
+---
+title: "mlm_gcm_fpca"
+author: "Suryadyuti Baral"
+date: "`r Sys.Date()`"
+output: html_document
+---
+```{r}
+train_test_split <- function(Y, prop_train = 0.5) {
+  is_vector <- is.null(dim(Y))
+  
+  if (is_vector) {
+    n_subj <- length(Y)
+    idx <- sample(seq_len(n_subj))
+    
+    n_train <- floor(prop_train * n_subj)
+    train_idx <- idx[1:n_train]
+    test_idx  <- idx[(n_train + 1):n_subj]
+    
+    train <- Y[train_idx]
+    test  <- Y[test_idx]
+    
+  } else {
+    n_subj <- nrow(Y)
+    idx <- sample(seq_len(n_subj))
+    
+    n_train <- floor(prop_train * n_subj)
+    train_idx <- idx[1:n_train]
+    test_idx  <- idx[(n_train + 1):n_subj]
+    
+    train <- Y[train_idx, , drop = FALSE]
+    test  <- Y[test_idx,  , drop = FALSE]
+  }
+  
+  list(
+    train = train,
+    test  = test,
+    train_idx = train_idx,
+    test_idx  = test_idx
+  )
+}
+
+
+introduce_missingness <- function(Y, missingness = 0.1, full = TRUE) {
+  # Y: matrix of size (n_subjects × n_timepoints) OR vector
+  # missingness: proportion of time points to be set missing
+  # full: if TRUE → induce missingness across entire dataset
+  #       if FALSE → induce missingness per subject
+  
+  Y_missing <- Y
+  is_vector <- is.null(nrow(Y))
+  
+  if (is_vector) {
+    # vector case
+    n_subj <- 1
+    n_time <- length(Y)
+  } else {
+    n_subj <- nrow(Y)
+    n_time <- ncol(Y)
+  }
+  
+  if (full) {
+    # ---- Full dataset missingness ----
+    total_points <- n_subj * n_time
+    n_missing <- ceiling(missingness * total_points)
+    
+    # Randomly select global positions
+    miss_idx <- sample(total_points, n_missing, replace = FALSE)
+    
+    # Convert to matrix indices
+    if (is_vector) {
+      Y_missing[miss_idx] <- NA
+    } else {
+      row_idx <- ((miss_idx - 1) %% n_subj) + 1
+      col_idx <- ((miss_idx - 1) %/% n_subj) + 1
+      Y_missing[cbind(row_idx, col_idx)] <- NA
+    }
+    
+  } else {
+    # ---- Subject-by-subject missingness ----
+    for (i in 1:n_subj) {
+      n_missing <- ceiling(missingness * n_time)
+      miss_idx <- sample(1:n_time, n_missing, replace = FALSE)
+      
+      if (is_vector) {
+        Y_missing[miss_idx] <- NA
+      } else {
+        Y_missing[i, miss_idx] <- NA
+      }
+    }
+  }
+  
+  return(Y_missing)
+}
+
+```
+
+```{r}
+library(fda)
+growth$hgtf
+
+Ly_ht <- lapply(seq_len(ncol(growth$hgtf)), function(i) growth$hgtf[,i])
+Lt_ht <- lapply(seq_len(ncol(growth$hgtf)), function(i) (growth$age - min(growth$age))/(max(growth$age - min(growth$age))))
+fpca_ht <- FPCA(Ly_ht, Lt_ht)
+plot(fpca_ht)
+
+fit_ng_ht <- ConvertSupport(fromGrid = fpca_ht$workGrid,
+                                      toGrid = time,
+                                      phi = fpca_ht$phi)
+matplot(fit_ng_ht[,1:2], type = "l")
+```
+
+```{r}
+library(fdapace)
+library(ggplot2)
+library(lavaan)
+set.seed(123)
+
+# Parameters
+n_subj <- 500
+time <- seq(0, 1, length.out = 30)
+n_time <- length(time)
+missingness = .3
+
+# ----- Functions -------
+f1_t <- sqrt(48/7) * time - (3/4) * (sqrt(48/7))
+f2_t <- sqrt(5) * time^2
+
+#f1_t <- fit_ng_ht[,1]
+#f2_t <- fit_ng_ht[,2]
+
+# ----- fixed effects -----
+beta_s <- 0
+beta_s2 <- 0
+
+# ----- Random effects -----
+sigma_s <- 1   # SD of random slope
+sigma_s2 <- 1  # SD of random slope for quadratic slope
+rho_ss2 <- 0      # correlation between slope and slope 2
+
+Sigma <- matrix(c(sigma_s^2, rho_ss2 * sigma_s * sigma_s2,
+                  rho_ss2 * sigma_s * sigma_s2, sigma_s2^2), 2, 2)
+
+# Draw random effects (b_i = intercept deviation, s_i = slope deviation)
+b_s <- MASS::mvrnorm(n_subj, mu = c(0, 0), Sigma = Sigma)
+s_i <- b_s[, 1]
+s2_i <- b_s[, 2]
+
+# Within-curve noise
+sigma_eps <- 0.5
+```
+
+
+```{r}
+# ----- Generate data -----
+Y <- matrix(NA, nrow = n_subj, ncol = n_time)
+for (i in 1:n_subj) {
+  Y[i, ] <- (beta_s + s_i[i]) * f1_t  + (beta_s2 + s2_i[i]) * f2_t + rnorm(n_time, 0, sigma_eps)
+}
+
+Y_quad_split <- train_test_split(Y) 
+
+Y_quad <- introduce_missingness(Y_quad_split$train, missingness)
+
+```
+
+```{r}
+set.seed(123)
+n_sample <- 50
+sample_ids <- sample(1:nrow(Y_quad), n_sample)
+
+# Convert to data frame for ggplot
+df_plot <- data.frame(
+  id = rep(sample_ids, each = length(time)),
+  time = rep(time, times = n_sample),
+  y = as.vector(t(Y_quad[sample_ids, ]))
+)
+
+# Plot
+ggplot(df_plot, aes(x = time, y = y, color = factor(id))) +
+  geom_line(size = 1) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = paste("Random Sample of", n_sample, "Subjects with Quadratic Functions"),
+    x = "Time",
+    y = "Y(t)",
+    color = "Subject ID"
+  ) +
+  theme(legend.position = "none")
+
+```
+
+```{r}
+# ----- Apply FPCA -----
+Ly_quad <- lapply(seq_len(nrow(Y_quad)), function(i) Y_quad[i,])
+Lt_quad <- lapply(seq_len(nrow(Y_quad)), function(i) time)
+
+fpca_quad <- FPCA(Ly_quad, Lt_quad)
+fit_ng <- ConvertSupport(fromGrid = fpca_quad$workGrid,
+                                      toGrid = time,
+                                      phi = fpca_quad$phi)
+plot(fpca_quad)
+```
+```{r}
+Y_test <- Y_quad_split$test
+loading1 <- fit_ng[,1]
+loading2 <- fit_ng[,2]
+
+dat_lav <- as.data.frame(Y_test)
+colnames(dat_lav) <- paste0("y", 1:n_time)
+l1 <- paste0(loading1, "*y", 1:n_time, collapse = " + ")
+l2 <- paste0(loading2, "*y", 1:n_time, collapse = " + ")
+
+growth_mod <- paste0("
+  eta1 =~ ", l1, "
+  eta2 =~ ", l2, "
+
+  eta1 ~~ eta1
+  eta2 ~~ eta2
+  eta1 ~~ eta2
+")
+
+fit <- growth(
+  model = growth_mod,
+  data  = dat_lav
+)
+
+summary(fit, standardized = TRUE, fit.measures = TRUE)
+```
+
+
+
