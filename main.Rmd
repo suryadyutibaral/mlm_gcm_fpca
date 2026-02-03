@@ -96,10 +96,9 @@ introduce_missingness <- function(Y, missingness = 0.1, full = TRUE) {
 
 ```{r}
 library(fda)
-growth$hgtf
 
-Ly_ht <- lapply(seq_len(ncol(growth$hgtf)), function(i) growth$hgtf[,i])
-Lt_ht <- lapply(seq_len(ncol(growth$hgtf)), function(i) (growth$age - min(growth$age))/(max(growth$age - min(growth$age))))
+Ly_ht <- lapply(seq_len(ncol(fda::growth$hgtf)), function(i) fda::growth$hgtf[,i])
+Lt_ht <- lapply(seq_len(ncol(fda::growth$hgtf)), function(i) (fda::growth$age - min(fda::growth$age))/(max(fda::growth$age - min(fda::growth$age))))
 fpca_ht <- FPCA(Ly_ht, Lt_ht)
 plot(fpca_ht)
 
@@ -113,7 +112,7 @@ matplot(fit_ng_ht[,1:2], type = "l")
 library(fdapace)
 library(ggplot2)
 library(lavaan)
-set.seed(123)
+set.seed(12)
 
 # Parameters
 n_subj <- 500
@@ -135,7 +134,7 @@ beta_s2 <- 0
 # ----- Random effects -----
 sigma_s <- 1   # SD of random slope
 sigma_s2 <- 1  # SD of random slope for quadratic slope
-rho_ss2 <- 0      # correlation between slope and slope 2
+rho_ss2 <- 0     # correlation between slope and slope 2
 
 Sigma <- matrix(c(sigma_s^2, rho_ss2 * sigma_s * sigma_s2,
                   rho_ss2 * sigma_s * sigma_s2, sigma_s2^2), 2, 2)
@@ -214,9 +213,13 @@ growth_mod <- paste0("
   eta1 =~ ", l1, "
   eta2 =~ ", l2, "
 
+  # latent variances & covariance
   eta1 ~~ eta1
   eta2 ~~ eta2
   eta1 ~~ eta2
+
+  # constant residual variance across time
+  ", paste0(colnames(dat_lav), " ~~ vare*", colnames(dat_lav), collapse = "\n"), "
 ")
 
 fit <- growth(
