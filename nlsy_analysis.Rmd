@@ -1,0 +1,131 @@
+---
+title: "nlys analysis"
+author: "Suryadyuti Baral"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+library(fdapace)
+nlsy <- read.csv("nlsy.csv", na.strings = ".")
+age_grid <- seq(6, 14, by = 2)
+df_read <- nlsy[!is.na(nlsy$read),]
+split_df <- split(df_read, df_read$id)
+Ly <- lapply(split_df, function(d) d$read)
+Lt <- lapply(split_df, function(d) d$age)
+fpca_read <- FPCA(Ly, Lt)
+plot(fpca_read)
+
+fit_ng_read <- ConvertSupport(fromGrid = fpca_read$workGrid,
+                                      toGrid = age_grid,
+                                      phi = fpca_read$phi)
+
+time <- fpca_read$obsGrid
+
+matplot(fit_ng_read[,1:2], type = "l")
+```
+
+```{r}
+Y <- LyLt_to_Y(Ly, Lt, time)
+Y_split <- train_test_split(Y) 
+Y_tr <- Y_split$train
+
+set.seed(123)
+n_sample <- 50
+sample_ids <- sample(1:nrow(Y_tr), n_sample)
+
+# Convert to data frame for ggplot
+df_plot <- data.frame(
+  id = rep(sample_ids, each = length(time)),
+  time = rep(time, times = n_sample),
+  y = as.vector(t(Y_tr[sample_ids, ]))
+)
+
+df_plot_clean <- df_plot |>
+  dplyr::filter(
+    !is.na(time),
+    !is.na(y)
+  )
+
+# Plot
+ggplot(
+  df_plot_clean,
+  aes(x = time, y = y, color = factor(id), group = id)
+) +
+  geom_line(alpha = 0.6, linewidth = 0.6) +
+  geom_point(size = 2) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = paste("Random Sample of", n_sample, "Subjects and Reading Data"),
+    x = "Time",
+    y = "Y(t)",
+    color = "Subject ID"
+  ) +
+  theme(legend.position = "none")
+
+```
+```{r}
+# ----- Apply FPCA -----
+Ly_tr <- lapply(seq_len(nrow(Y_tr)), function(i) Y_tr[i,])
+Lt_tr <- lapply(seq_len(nrow(Y_tr)), function(i) time)
+
+fpca_tr <- FPCA(Ly_tr, Lt_tr)
+fit_ng_tr <- ConvertSupport(fromGrid = fpca_tr$workGrid,
+                                      toGrid = age_grid,
+                                      phi = fpca_tr$phi)
+plot(fpca_tr)
+matplot(fit_ng_tr[,1:2], type = "l")
+```
+```{r}
+Y_test <- Y_split$test
+Y_bin <- bin_time_matrix(Y_test, fpca_tr$obsGrid, age_grid, check = TRUE)
+
+loading1 <- fit_ng_tr[,1]
+loading2 <- fit_ng_tr[,2]
+
+dat_lav <- as.data.frame(Y_bin)
+colnames(dat_lav) <- paste0("y", 1:length(age_grid))
+l1 <- paste0(loading1, "*y", 1:length(age_grid), collapse = " + ")
+l2 <- paste0(loading2, "*y", 1:length(age_grid), collapse = " + ")
+
+growth_mod <- paste0("
+  eta1 =~ ", l1, "
+
+  # latent variances & covariance
+  eta1 ~~ eta1
+
+  # constant residual variance across time
+  ", paste0(colnames(dat_lav), " ~~ vare*", colnames(dat_lav), collapse = "\n"), "
+")
+
+fit <- growth(
+  model = growth_mod,
+  data  = dat_lav,
+  missing = "fiml", 
+  em.h1.iter.max = 10000 
+)
+
+summary(fit, standardized = TRUE, fit.measures = TRUE)
+```
+
+```{r}
+growth_mod_lin <- paste0("
+  eta1 =~ 0*y1 + 0.25*y2 + 0.5*y3 + 0.75*y4 + 1*y5
+
+  # latent variances & covariance
+  eta1 ~~ eta1
+
+  # constant residual variance across time
+  ", paste0(colnames(dat_lav), " ~~ vare*", colnames(dat_lav), collapse = "\n"), "
+")
+
+fitq <- growth(
+  model = growth_mod_lin,
+  data  = dat_lav,
+  missing = "fiml", 
+  em.h1.iter.max = 10000 
+)
+
+summary(fitq, standardized = TRUE, fit.measures = TRUE)
+```
+
