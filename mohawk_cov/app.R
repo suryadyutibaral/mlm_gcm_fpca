@@ -12,39 +12,51 @@ library(MASS)
 library(plotly)
 
 ui <- fluidPage(
+  
   titlePanel("Covariance Topology Explorer"),
-
-sidebarPanel(
-  width = 3,
-  tags$style("
-    .control-label { font-size: 12px; }
-    .shiny-input-container { margin-bottom: 6px; }
-  "),
-
-  sliderInput("n_subj", "Subjects",
-              min = 50, max = 2000, value = 1000, step = 50),
-
-  sliderInput("n_time", "Time points",
-              min = 5, max = 500, value = 100, step = 5),
-
-  numericInput("beta0", "β₀", value = 1),
-  numericInput("beta1", "β₁", value = 2),
-  numericInput("sigma_eps", "Noise SD", value = 0.5, min = 0),
-
-  tags$details(
-    tags$summary("Random effects"),
-    numericInput("sigma_b0", "Var(b₀)", value = 1.0, min = 0),
-    numericInput("sigma_b1", "Var(b₁)", value = 1.0, min = 0),
-    numericInput("sigma_b01", "Cov(b₀,b₁)", value = 0)
-  ),
-
-  actionButton("simulate", "Update", class = "btn-primary btn-sm")
-),
-
+  
+  sidebarLayout(
+    
+    sidebarPanel(
+      width = 3,
+      
+      tags$style("
+        .control-label { font-size: 12px; }
+        .shiny-input-container { margin-bottom: 6px; }
+      "),
+      
+      sliderInput("n_subj", "Subjects",
+                  min = 50, max = 2000, value = 1000, step = 50),
+      
+      sliderInput("n_time", "Time points",
+                  min = 5, max = 500, value = 100, step = 5),
+      
+      numericInput("beta0", "β₀", value = 1),
+      numericInput("beta1", "β₁", value = 2),
+      numericInput("sigma_eps", "Noise SD", value = 0.5, min = 0),
+      
+      textInput(
+        "f_t",
+        "f(time) =",
+        value = "time"
+      ),
+      
+      tags$details(
+        tags$summary("Random effects"),
+        numericInput("sigma_b0", "Var(b₀)", value = 1.0, min = 0),
+        numericInput("sigma_b1", "Var(b₁)", value = 1.0, min = 0),
+        numericInput("sigma_b01", "Cov(b₀,b₁)", value = 0)
+      ),
+      
+      actionButton("simulate", "Update", class = "btn-primary btn-sm")
+    ),
+    
     mainPanel(
       plotlyOutput("cov_plot", height = "600px")
     )
+    
   )
+)
 
 
 server <- function(input, output) {
@@ -55,6 +67,20 @@ server <- function(input, output) {
 
     # Time grid
     time <- seq(0, 1, length.out = input$n_time)
+    
+    # Safely evaluate user function
+    f_time <- tryCatch({
+      eval(parse(text = input$f_t), envir = list(time = time))
+    }, error = function(e) {
+      warning("Invalid function. Using time instead.")
+      time
+    })
+    
+    # Ensure correct length
+    if (length(f_time) != input$n_time) {
+      f_time <- time
+    }
+    
 
     # Random effects covariance
     Sigma_b <- matrix(
@@ -74,7 +100,7 @@ server <- function(input, output) {
     for (i in seq_len(input$n_subj)) {
       X[i, ] <-
         (input$beta0 + b[i, 1]) +
-        (input$beta1 + b[i, 2]) * time +
+        (input$beta1 + b[i, 2]) * f_time +
         rnorm(input$n_time, sd = input$sigma_eps)
     }
 

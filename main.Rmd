@@ -179,16 +179,19 @@ set.seed(12)
 
 # Parameters
 n_subj <- 500
-time <- seq(0, 1, length.out = 24)
+time <- seq(0, 1, length.out = 12)
 n_time <- length(time)
 missingness = .2
 
 # ----- Functions -------
-f1_t <- sqrt(48/7) * time - (3/4) * (sqrt(48/7))
-f2_t <- sqrt(5) * time^2
+#f1_t <- sqrt(48/7) * time - (3/4) * (sqrt(48/7))
+#f2_t <- sqrt(5) * time^2
 
 #f1_t <- fit_ng_ht[,1]
 #f2_t <- fit_ng_ht[,2]
+
+f1_t <- time
+f2_t <- sin(2*pi*time)
 
 # ----- fixed effects -----
 beta_s <- 0
@@ -197,7 +200,7 @@ beta_s2 <- 0
 # ----- Random effects -----
 sigma_s <- 1   # SD of random slope
 sigma_s2 <- 1  # SD of random slope for quadratic slope
-rho_ss2 <- 0     # correlation between slope and slope 2
+rho_ss2 <- 0.8     # correlation between slope and slope 2
 
 Sigma <- matrix(c(sigma_s^2, rho_ss2 * sigma_s * sigma_s2,
                   rho_ss2 * sigma_s * sigma_s2, sigma_s2^2), 2, 2)
