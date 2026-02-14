@@ -1,0 +1,143 @@
+---
+title: "mhs_analysis"
+author: "Suryadyuti Baral"
+date: "`r Sys.Date()`"
+output: html_document
+---
+```{r}
+library(fdapace)
+mhs <- read.csv("mhs_latent.csv", na.strings = ".")
+range(mhs$age)
+age_grid <- seq(14, 20, by = 1)
+wave <- 1:4
+mot_scores <- as_tibble(mhs[,c("id", "age", "mot1", "mot2", "mot3", "mot4")])
+mot_scores <- mot_scores[!is.na(mot_scores$mot1) | !is.na(mot_scores$mot2) |
+                  !is.na(mot_scores$mot3) | !is.na(mot_scores$mot4),]
+mot_scores <- mot_scores %>%
+  mutate(age1 = age, age2 = age + 1, age3 = age + 2, age4 = age + 3) %>%
+  dplyr::select(id, age1, age2, age3, age4, mot1, mot2, mot3, mot4)
+head(mot_scores)
+
+Ly <- lapply(seq_len(nrow(mot_scores)), function(i) {
+  as.numeric(mot_scores[i, grep("^mot", names(mot_scores))]) - 
+  mean(as.numeric(mot_scores[i, grep("^mot", names(mot_scores))]), na.rm = TRUE)
+})
+
+Lt <- lapply(seq_len(nrow(mot_scores)), function(i) {
+  as.numeric(mot_scores[i, grep("^age", names(mot_scores))]) 
+})
+
+Lt <- lapply(seq_len(nrow(mot_scores)), function(i) {wave})
+
+mot_fpca <- FPCA(Ly, Lt, optns = list(methodMuCovEst = "smooth"))
+plot(mot_fpca)
+
+fit_ng <- ConvertSupport(fromGrid = mot_fpca$workGrid,
+                                      toGrid = wave,
+                                      phi = mot_fpca$phi)
+
+```
+```{r}
+set.seed(123)
+n_sample <- 50
+sample_ids <- sample(1:nrow(mot_scores), n_sample)
+
+# Convert to data frame for ggplot
+df_plot <- data.frame(
+  id = rep(sample_ids, each = length(wave)),
+  wave = rep(wave, times = n_sample),
+  y = as.vector(t(mot_scores[sample_ids, 6:9]))
+)
+
+df_plot_clean <- df_plot |>
+  dplyr::filter(
+    !is.na(wave),
+    !is.na(y)
+  )
+
+# Plot
+ggplot(
+  df_plot_clean,
+  aes(x = wave, y = y, color = factor(id), group = id)
+) +
+  geom_line(alpha = 0.6, linewidth = 0.6) +
+  geom_point(size = 2) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = paste("Random Sample of", n_sample, "Subjects with their Motivation Scores"),
+    x = "Time",
+    y = "Y(t)",
+    color = "Subject ID"
+  ) +
+  theme(legend.position = "none")
+```
+```{r}
+loading0 <- rep(1, 4)
+loading1 <- fit_ng[,1]
+loading2 <- fit_ng[,2]
+
+dat_lav <- mot_scores[, 6:9]
+
+l0 <- paste0(loading0, "*mot", wave, collapse = " + ")
+l1 <- paste0(loading1, "*mot", wave, collapse = " + ")
+l2 <- paste0(loading2, "*mot", wave, collapse = " + ")
+
+growth_mod <- paste0("
+  eta0 =~ ", l0, "
+  eta1 =~ ", l1, "
+  eta2 =~ ", l2, "
+
+  # latent variances & covariance
+  eta0 ~~ eta0
+  eta1 ~~ eta1
+  eta2 ~~ eta2
+  eta0 ~~ eta1
+  eta0 ~~ eta2
+  eta1 ~~ eta2
+
+  # constant residual variance across time
+  ", paste0(colnames(dat_lav), " ~~ vare*", colnames(dat_lav), collapse = "\n"), "
+")
+
+fit <- growth(
+  model = growth_mod,
+  data  = dat_lav,
+  missing = "fiml", 
+  em.h1.iter.max = 10000 
+)
+
+summary(fit, standardized = TRUE, fit.measures = TRUE)
+```
+
+```{r}
+loading1 <- rep(1,4)
+loading2 <- seq(0,1, length.out = 4)
+
+dat_lav <- mot_scores[, 6:9]
+
+l1 <- paste0(loading1, "*mot", wave, collapse = " + ")
+l2 <- paste0(loading2, "*mot", wave, collapse = " + ")
+
+growth_mod <- paste0("
+  eta1 =~ ", l1, "
+  eta2 =~ ", l2, "
+
+  # latent variances & covariance
+  eta1 ~~ eta1
+  eta2 ~~ eta2
+  eta1 ~~ eta2
+
+  # constant residual variance across time
+  ", paste0(colnames(dat_lav), " ~~ vare*", colnames(dat_lav), collapse = "\n"), "
+")
+
+fit <- growth(
+  model = growth_mod,
+  data  = dat_lav,
+  missing = "fiml", 
+  em.h1.iter.max = 10000 
+)
+
+summary(fit, standardized = TRUE, fit.measures = TRUE)
+```
+

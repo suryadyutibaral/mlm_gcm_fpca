@@ -1,0 +1,183 @@
+---
+title: "ILD_FPCA"
+author: "Suryadyuti Baral"
+date: "`r Sys.Date()`"
+output: html_document
+---
+#Dependencies
+```{r}
+library(fda)
+library(fdapace)
+library(ggplot2)
+library(lavaan)
+library(tidyr)
+library(dplyr)
+library(lme4)
+library(MASS)
+library(purrr)
+source("Rfunctions_gcm_fpca.R")
+
+```
+
+# Condition: Parametric Functions
+```{r message=FALSE, warning=FALSE}
+set.seed(12)
+
+library(tidyverse)
+
+n_vals   <- c(100, 200, 500)
+tp_vals  <- c(12, 30)
+cor_vals <- c(0, 0.3, 0.8)
+
+conditions <- expand_grid(
+  n_subj      = n_vals,
+  time_points = tp_vals,
+  cor_ss      = cor_vals
+) %>%
+  mutate(
+    cond_name = paste0(
+      "n", n_subj,
+      "_tp", time_points,
+      "_cor", cor_ss
+    )
+  )
+
+n_mc <- 10
+
+mc_results <- map_dfr(1:n_mc, function(iter){
+
+  # For each condition run the simulation
+  cond_outputs <- map2(
+    seq_len(nrow(conditions)),
+    conditions$cond_name,
+    function(i, cname){
+
+      n  <- conditions$n_subj[i]
+      tp <- conditions$time_points[i]
+      cs <- conditions$cor_ss[i]
+
+      time <- seq(0, 1, length.out = tp)
+
+      f1_t <- sqrt(48/7) * time - (3/4) * (sqrt(48/7))
+      f2_t <- sqrt(5) * time^2
+
+      run_mc(iter, n, tp, cs, f1_t, f2_t)
+    }
+  )
+
+  names(cond_outputs) <- conditions$cond_name
+
+  tibble(iter = iter) %>%
+    bind_cols(as_tibble(cond_outputs))
+})
+
+```
+
+#Condition: Non-parametric Functions
+
+```{r message=FALSE, warning=FALSE}
+set.seed(12)
+
+conditions <- expand_grid(
+  n_subj      = n_vals,
+  time_points = tp_vals,
+  cor_ss      = cor_vals
+) %>%
+  mutate(
+    cond_name = paste0(
+      "n", n_subj,
+      "_tp", time_points,
+      "_cor", cor_ss
+    )
+  )
+
+n_mc <- 100
+
+mc_results_np <- map_dfr(1:n_mc, function(iter){
+
+  # For each condition run the simulation
+  cond_outputs <- map2(
+    seq_len(nrow(conditions)),
+    conditions$cond_name,
+    function(i, cname){
+
+      n  <- conditions$n_subj[i]
+      tp <- conditions$time_points[i]
+      cs <- conditions$cor_ss[i]
+
+      time <- seq(0, 1, length.out = tp)
+
+      Ly_ht <- lapply(seq_len(ncol(fda::growth$hgtf)), function(i)
+        fda::growth$hgtf[,i])
+      Lt_ht <- lapply(seq_len(ncol(fda::growth$hgtf)), function(i)
+        (fda::growth$age - min(fda::growth$age))/
+          (max(fda::growth$age - min(fda::growth$age))))
+      fpca_ht <- FPCA(Ly_ht, Lt_ht)
+      fit_ng_ht <- ConvertSupport(fromGrid = fpca_ht$workGrid,
+                                      toGrid = time,
+                                      phi = fpca_ht$phi)
+      f1_t <- fit_ng_ht[,1]
+      f2_t <- fit_ng_ht[,2]
+
+      run_mc_np(iter, n, tp, cs, f1_t, f2_t)
+    }
+  )
+
+  names(cond_outputs) <- conditions$cond_name
+
+  tibble(iter = iter) %>%
+    bind_cols(as_tibble(cond_outputs))
+})
+
+```
+
+
+# Condition: Non-orthonormal functions
+
+```{r eval=FALSE, include=FALSE}
+# ----- Apply FPCA -----
+Ly_quad_c <- lapply(seq_len(nrow(Y_quad)), function(i) Y_quad[i,] - mean(Y_quad[i,], na.rm = TRUE))
+Lt_quad <- lapply(seq_len(nrow(Y_quad)), function(i) time)
+
+fpca_quad_c <- FPCA(Ly_quad_c, Lt_quad)
+fit_ng_c <- ConvertSupport(fromGrid = fpca_quad_c$workGrid,
+                                      toGrid = time,
+                                      phi = fpca_quad_c$phi)
+plot(fpca_quad_c)
+```
+
+
+```{r}
+Y_test <- Y_quad_split$test
+loading1 <- rep(1, n_time)
+loading2 <- fit_ng_c[,1]
+
+dat_lav <- as.data.frame(Y_test)
+colnames(dat_lav) <- paste0("y", 1:n_time)
+l1 <- paste0(loading1, "*y", 1:n_time, collapse = " + ")
+l2 <- paste0(loading2, "*y", 1:n_time, collapse = " + ")
+
+growth_mod_c <- paste0("
+  eta1 =~ ", l1, "
+  eta2 =~ ", l2, "
+
+  # latent variances & covariance
+  eta1 ~~ eta1
+  eta2 ~~ eta2
+  eta1 ~~ eta2
+
+  # constant residual variance across time
+  ", paste0(colnames(dat_lav), " ~~ vare*", colnames(dat_lav), collapse = "\n"), "
+")
+
+fit_c <- growth(
+  model = growth_mod_c,
+  data  = dat_lav,
+  missing = "fiml", 
+  em.h1.iter.max = 10000 
+)
+
+summary(fit_c, standardized = TRUE, fit.measures = TRUE)
+```
+
+

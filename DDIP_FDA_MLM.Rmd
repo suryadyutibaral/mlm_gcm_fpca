@@ -1,0 +1,832 @@
+---
+title: "Untitled"
+author: "Suryadyuti Baral"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+begin = Sys.time()
+library(dplyr)
+library(refund)
+library(tidyverse)
+library(fdapace)
+
+bootstrap_fpca_ci <- function(Y, nb_boot = 100, n_eig = 2, argvals = t, prob = c(.025, .975)) {
+  # Y: subjects x time matrix (rows = subjects, columns = time points)
+  # nb_boot: number of bootstrap samples
+  # n_eig: number of eigenfunctions to extract (usually 1)
+  
+  n_subj <- nrow(Y)
+  n_time <- ncol(Y)
+  
+  Ly <- lapply(seq_len(nrow(Y)), function(i) Y[i,])
+  Lt <- lapply(seq_len(nrow(Y)), function(i) argvals)
+  
+  # Fit FPCA on original data
+  fpca_fit <- FPCA(Ly, Lt)
+  phi_hat <- fpca_fit$phi[, 1:n_eig, drop = FALSE]
+  scores_hat <- fpca_fit$xiEst[, 1:n_eig, drop = FALSE]
+  t_grid <- fpca_fit$workGrid
+  
+  # Store bootstrap results
+  phi_boot <- array(NA, dim = c(length(t_grid), n_eig, nb_boot))
+  scores_boot <- array(NA, dim = c(n_subj, n_eig, nb_boot))
+  
+  for (b in 1:nb_boot) {
+    # Bootstrap subjects
+    boot_ids <- sample(1:n_subj, n_subj, replace = TRUE)
+    Y_boot <- Y[boot_ids, ]
+    Ly <- lapply(seq_len(nrow(Y_boot)), function(i) Y_boot[i,])
+    
+    # Fit FPCA
+    fpca_b <- try(FPCA(Ly, Lt), silent = TRUE)
+    if (inherits(fpca_b, "try-error")) next
+    
+    # Align eigenfunction sign (since eigenfunctions are defined up to ±1)
+    phi_b <- fpca_b$phi[, 1:n_eig, drop = FALSE]
+    for (k in 1:n_eig) {
+      sign_correction <- sign(sum(phi_b[, k] * phi_hat[, k]))
+      phi_b[, k] <- sign_correction * phi_b[, k]
+    }
+
+    phi_boot[, , b] <- phi_b
+    scores_boot[, , b] <- fpca_b$xiEst[, 1:n_eig, drop = FALSE]
+  }
+  
+  # Compute CIs for eigenfunctions
+  phi_lower <- apply(phi_boot, c(1, 2), quantile, probs = prob[1], na.rm = TRUE)
+  phi_upper <- apply(phi_boot, c(1, 2), quantile, probs = prob[2], na.rm = TRUE)
+  phi_mean  <- apply(phi_boot, c(1, 2), mean, na.rm = TRUE)
+  
+  # Compute CIs for scores (across bootstraps)
+  score_lower <- apply(scores_boot, c(1, 2), quantile, probs = 0.025, na.rm = TRUE)
+  score_upper <- apply(scores_boot, c(1, 2), quantile, probs = 0.975, na.rm = TRUE)
+  score_mean  <- apply(scores_boot, c(1, 2), mean, na.rm = TRUE)
+  
+  # Return results
+  list(
+    t = t_grid,
+    phi_hat = phi_hat,
+    phi_mean = phi_mean,
+    phi_lower = phi_lower,
+    phi_upper = phi_upper,
+    scores_hat = scores_hat,
+    score_mean = score_mean,
+    score_lower = score_lower,
+    score_upper = score_upper
+  )
+}
+```
+
+#Positive Affect general
+```{r}
+ddip <- read.csv("C:/Users/surya/Box/UC_Davis/DDIP_Daily_Final_All.csv")
+dyad_ids <- unique(ddip$id_dyad)
+
+# randomly choose 1 or 2 with prob = 0.5
+set.seed(123)
+suffix <- sample(c("1", "2"), size = length(dyad_ids), replace = TRUE)
+dyad_ids_with_suffix <- as.numeric(paste0(dyad_ids, suffix))
+
+ddip_sub <- ddip %>%
+  dplyr::filter(id_indiv %in% dyad_ids_with_suffix & day > 0) %>% 
+  dplyr::select(id_indiv, day, pa_gral, na_gral, pa_rel, na_rel) %>%
+  mutate(
+    max_day = max(day),
+    min_day = min(day),
+    time = (day-min_day)/(max_day-min_day),
+    id = id_indiv
+  ) %>%
+  dplyr::select(id, time, pa_gral)  %>%
+  group_by(id) %>%
+  mutate(
+    mean_pa = mean(pa_gral, na.rm = TRUE),
+    c_pa = (pa_gral - mean_pa)
+  ) %>% 
+  ungroup() %>%
+  dplyr::select(id, time, c_pa)
+
+ddip_wide <- ddip_sub %>%
+  arrange(id, time) %>%   
+  pivot_wider(
+    names_from = time,
+    values_from = c_pa,
+    names_prefix = "t"
+  ) %>% as.matrix()
+
+head(ddip_sub)
+head(ddip_wide)
+```
+
+```{r}
+Lt <- ddip_sub %>%
+  dplyr::group_by(id) %>%
+  dplyr::summarise(t = list(time), .groups = "drop") %>%
+  dplyr::pull(t)
+
+Ly <- ddip_sub %>%
+  dplyr::group_by(id) %>%
+  dplyr::summarise(y = list(c_pa), .groups = "drop") %>%
+  dplyr::pull(y)
+
+ddip_fpca <- FPCA(Ly, Lt)
+plot(ddip_fpca)
+```
+```{r}
+library(dplyr)
+library(ggplot2)
+
+set.seed(456)
+
+n_sample <- 100
+sample_ids <- ddip_sub %>%
+  distinct(id) %>%
+  slice_sample(n = n_sample) %>%
+  pull(id)
+
+df_plot <- ddip_sub %>%
+  filter(id %in% sample_ids) 
+
+ggplot(df_plot, aes(time, c_pa, group = id, color = factor(id))) +
+  geom_line(linewidth = 1) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = paste("Random Sample of", n_sample, "Subjects with PA (Person-Mean Centered)"),
+    x = "Time",
+    y = "PA (general)"
+  ) +
+  theme(legend.position = "none")
+
+```
+
+```{r}
+set.seed(123)
+boot_results <- bootstrap_fpca_ci(ddip_wide[,-1], nb_boot = 100, 
+                                  n_eig = 3, argvals = seq(0, 1, length.out = 95), prob = c(0,1))
+```
+
+```{r}
+# Plot the first eigenfunction with 95% CI
+df_phi1 <- data.frame(
+  t = boot_results$t,
+  mean = boot_results$phi_mean[, 1],
+  lower = boot_results$phi_lower[, 1],
+  upper = boot_results$phi_upper[, 1]
+)
+
+ggplot(df_phi1, aes(x = t, y = mean)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, fill = "pink") +
+  geom_line(size = 1.2, color = "red") +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Bootstrap 95% CI for First Eigenfunction",
+    x = "Time",
+    y = "Eigenfunction Value"
+  )
+
+```
+
+```{r}
+# Plot the second eigenfunction with 95% CI
+df_phi2 <- data.frame(
+  t = boot_results$t,
+  mean = boot_results$phi_mean[, 2],
+  lower = boot_results$phi_lower[, 2],
+  upper = boot_results$phi_upper[, 2]
+)
+
+ggplot(df_phi2, aes(x = t, y = mean)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, fill = "skyblue") +
+  geom_line(size = 1.2, color = "blue") +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Bootstrap 95% CI for Second Eigenfunction",
+    x = "Time",
+    y = "Eigenfunction Value"
+  )
+
+```
+```{r}
+# Plot the third eigenfunction with 95% CI
+df_phi3 <- data.frame(
+  t = boot_results$t,
+  mean = boot_results$phi_mean[, 3],
+  lower = boot_results$phi_lower[, 3],
+  upper = boot_results$phi_upper[, 3]
+)
+
+ggplot(df_phi3, aes(x = t, y = mean)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, fill = "lightgreen") +
+  geom_line(size = 1.2, color = "darkgreen") +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Bootstrap 95% CI for Third Eigenfunction",
+    x = "Time",
+    y = "Eigenfunction Value"
+  )
+
+```
+
+I will use a linear function or an exponential decay function for the first eigenfunction.
+
+```{r}
+#Identifying the exponential decay function using OLS
+y <- df_phi1$mean
+t <- seq(0,1, length.out = length(y))
+
+dat <- data.frame(t = t, y = y)
+
+fit_exp <- nls(
+  y ~ a * exp(-b * t) + c,
+  data = dat,
+  start = list(
+    a = y[1] - tail(y, 1),
+    b = 3,
+    c = tail(y, 1)
+  )
+)
+
+dat$y_hat <- predict(fit_exp)
+
+plot(t, y, type = "l", lwd = 2)
+lines(t, dat$y_hat, col = "red", lwd = 2)
+legend("topright", legend = c("Observed", "Exp fit"),
+       col = c("black", "red"), lwd = 2)
+
+summary(fit_exp)
+confint(fit_exp)
+
+#Identifying the linear function using OLS
+y <- df_phi1$mean
+t <- seq(0,1, length.out = length(y))
+
+dat_lin <- data.frame(t = t, y = y)
+
+fit_lin <- lm(
+  y ~ t,
+  data = dat_lin
+)
+
+dat_lin$y_hat <- predict(fit_lin)
+
+plot(t, y, type = "l", lwd = 2)
+lines(t, dat_lin$y_hat, col = "red", lwd = 2)
+legend("topright", legend = c("Observed", "lin fit"),
+       col = c("black", "red"), lwd = 2)
+
+summary(fit_lin)
+confint(fit_lin)
+anova(fit_exp, fit_lin)
+
+phi1_pred <- function(t){
+  coef <- as.numeric(coef(fit_exp))
+  return(coef[1] * exp(-1*coef[2] * t) + coef[3])}
+```
+I will use a quadratic function or a cosine function for the first eigenfunction.
+
+```{r}
+# Data
+y <- df_phi2$mean
+t <- seq(0, 1, length.out = length(y))
+dat <- data.frame(t, y)
+
+# Quadratic: y = b0 + b2 t^2
+fit_quad <- nls(
+  y ~ a*(t)^2 + p,
+  data = dat,
+  start = list(a = max(abs(y)), p = 0)
+)
+# Cosine: y = a cos(bt + p)
+fit_cos <- nls(
+  y ~ a * cos(b * t + p),
+  data = dat,
+  start = list(a = max(abs(y)), b = 2*pi, p = 0)
+)
+
+# Predictions
+dat$y_quad <- predict(fit_quad)
+dat$y_cos  <- predict(fit_cos)
+
+# Plot
+plot(t, y, type = "l", lwd = 2)
+lines(t, dat$y_quad, col = "red", lwd = 2)
+lines(t, dat$y_cos, col = "blue", lwd = 2)
+legend("topright",
+       legend = c("Observed", "Quadratic", "Cosine"),
+       col = c("black", "red", "blue"),
+       lwd = 2)
+
+# Output
+summary(fit_quad)
+summary(fit_cos)
+anova(fit_cos, fit_quad)
+
+phi2_pred <- function(t){
+  coef <- as.numeric(coef(fit_cos))
+  return(coef[1] * cos(coef[2] * t + coef[3]))}
+
+```
+Figuring out which cosine function would fit phi3 best
+
+```{r}
+# Data
+y <- df_phi3$mean
+t <- seq(0, 1, length.out = length(y))
+dat <- data.frame(t, y)
+
+# Cosine: y = a cos(bt + p)
+fit_cos2 <- nls(
+  y ~ a * cos(b * t + p),
+  data = dat,
+  start = list(a = max(abs(y)), b = pi, p = 0)
+)
+
+# Predictions
+dat$y_cos  <- predict(fit_cos2)
+
+# Plot
+plot(t, y, type = "l", lwd = 2)
+lines(t, dat$y_cos, col = "blue", lwd = 2)
+legend("topright",
+       legend = c("Observed", "Cosine"),
+       col = c("black", "blue"),
+       lwd = 2)
+
+# Output
+summary(fit_cos2)
+
+phi3_pred <- function(t){
+  coef <- as.numeric(coef(fit_cos2))
+  return(coef[1] * cos(coef[2] * t + coef[3]))}
+
+```
+```{r}
+newGrid <- seq(0, 1, length.out = 95)
+fit_ng <- ConvertSupport(fromGrid = ddip_fpca$workGrid,
+                                      toGrid = newGrid,
+                                      phi = ddip_fpca$phi)
+
+dat_phi <- as_tibble(cbind(phi1 = fit_ng[,1], phi2 = fit_ng[,2], phi3 = fit_ng[,3],
+                           t = round(newGrid, 3)))
+```
+
+```{r}
+ddip_sub <- ddip %>%
+  dplyr::filter(id_indiv %in% dyad_ids_with_suffix & day > 0) %>% 
+  dplyr::select(id_indiv, day, pa_gral, na_gral, pa_rel, na_rel) %>%
+  mutate(
+    max_day = max(day),
+    min_day = min(day),
+    time = (day-min_day)/(max_day-min_day),
+    id = id_indiv
+  ) %>%
+  dplyr::select(id, time, pa_gral) 
+
+library(lme4)
+
+ddip_final <- ddip_sub %>%
+  group_by(id) %>%
+  mutate(
+    t = round(time, 3)
+  ) %>% left_join(dat_phi, by = "t") %>%
+  ungroup()
+
+
+# Fit linear + exp model with random intercepts & slopes
+full_model <- lmer(
+  pa_gral ~ 
+    1 + phi1_pred(t) + phi2_pred(t) + phi3_pred(t) + 
+    (1 + phi1_pred(t) + phi2_pred(t) + phi3_pred(t) | id),
+  data = ddip_final,
+  REML = TRUE
+)
+
+full_model_fpca <- lmer(
+  pa_gral ~ 
+    1 + phi1 + phi2 + phi3 + 
+    (1 + phi1 + phi2 + phi3 | id),
+  data = ddip_final,
+  REML = TRUE
+)
+
+summary(full_model)
+summary(full_model_fpca)
+
+fit_null <- lmer(
+  pa_gral ~ 1 + (1 | id),
+  data = ddip_final,
+  REML = TRUE
+)
+
+#McFadden's pseudo r^2
+1 - (logLik(full_model)/logLik(fit_null))
+1 - (logLik(full_model_fpca)/logLik(fit_null))
+
+anova(fit_null, full_model_fpca)
+```
+```{r}
+end = Sys.time()
+end-begin
+```
+
+
+#Negative Affect
+```{r}
+# randomly choose 1 or 2 with prob = 0.5
+set.seed(222)
+suffix <- sample(c("1", "2"), size = length(dyad_ids), replace = TRUE)
+dyad_ids_with_suffix <- as.numeric(paste0(dyad_ids, suffix))
+
+ddip_sub <- ddip %>%
+  dplyr::filter(id_indiv %in% dyad_ids_with_suffix & day > 0) %>% 
+  dplyr::select(id_indiv, day, pa_gral, na_gral, pa_rel, na_rel) %>%
+  mutate(
+    max_day = max(day),
+    min_day = min(day),
+    time = (day-min_day)/(max_day-min_day),
+    id = id_indiv
+  ) %>%
+  dplyr::select(id, time, na_gral)  %>%
+  group_by(id) %>%
+  mutate(
+    mean_na = mean(na_gral, na.rm = TRUE),
+    c_na = (na_gral - mean_na)
+  ) %>% 
+  ungroup() %>%
+  dplyr::select(id, time, c_na)
+
+ddip_wide <- ddip_sub %>%
+  arrange(id, time) %>%   
+  pivot_wider(
+    names_from = time,
+    values_from = c_na,
+    names_prefix = "t"
+  ) %>% as.matrix()
+
+head(ddip_sub)
+head(ddip_wide)
+```
+
+```{r}
+Lt <- ddip_sub %>%
+  dplyr::group_by(id) %>%
+  dplyr::summarise(t = list(time), .groups = "drop") %>%
+  dplyr::pull(t)
+
+Ly <- ddip_sub %>%
+  dplyr::group_by(id) %>%
+  dplyr::summarise(y = list(c_na), .groups = "drop") %>%
+  dplyr::pull(y)
+
+ddip_fpca <- FPCA(Ly, Lt)
+plot(ddip_fpca)
+```
+```{r}
+library(dplyr)
+library(ggplot2)
+
+set.seed(456)
+
+n_sample <- 100
+sample_ids <- ddip_sub %>%
+  distinct(id) %>%
+  slice_sample(n = n_sample) %>%
+  pull(id)
+
+df_plot <- ddip_sub %>%
+  filter(id %in% sample_ids) 
+
+ggplot(df_plot, aes(time, c_na, group = id, color = factor(id))) +
+  geom_line(linewidth = 1) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = paste("Random Sample of", n_sample, "Subjects with NA (Person-Mean Centered)"),
+    x = "Time",
+    y = "NA (general)"
+  ) +
+  theme(legend.position = "none")
+
+```
+
+```{r}
+set.seed(123)
+boot_results <- bootstrap_fpca_ci(ddip_wide[,-1], nb_boot = 100, 
+                                  n_eig = 3, argvals = seq(0, 1, length.out = 95), prob = c(0, 1))
+```
+
+```{r}
+# Plot the first eigenfunction with 95% CI
+df_phi1 <- data.frame(
+  t = boot_results$t,
+  mean = boot_results$phi_mean[, 1],
+  lower = boot_results$phi_lower[, 1],
+  upper = boot_results$phi_upper[, 1]
+)
+
+ggplot(df_phi1, aes(x = t, y = mean)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, fill = "pink") +
+  geom_line(size = 1.2, color = "red") +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Bootstrap 95% CI for First Eigenfunction",
+    x = "Time",
+    y = "Eigenfunction Value"
+  )
+
+```
+
+```{r}
+# Plot the second eigenfunction with 95% CI
+df_phi2 <- data.frame(
+  t = boot_results$t,
+  mean = boot_results$phi_mean[, 2],
+  lower = boot_results$phi_lower[, 2],
+  upper = boot_results$phi_upper[, 2]
+)
+
+ggplot(df_phi2, aes(x = t, y = mean)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, fill = "skyblue") +
+  geom_line(size = 1.2, color = "blue") +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Bootstrap 95% CI for Second Eigenfunction",
+    x = "Time",
+    y = "Eigenfunction Value"
+  )
+
+```
+```{r}
+# Plot the third eigenfunction with 95% CI
+df_phi3 <- data.frame(
+  t = boot_results$t,
+  mean = boot_results$phi_mean[, 3],
+  lower = boot_results$phi_lower[, 3],
+  upper = boot_results$phi_upper[, 3]
+)
+
+ggplot(df_phi3, aes(x = t, y = mean)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, fill = "lightgreen") +
+  geom_line(size = 1.2, color = "darkgreen") +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Bootstrap 95% CI for Third Eigenfunction",
+    x = "Time",
+    y = "Eigenfunction Value"
+  )
+
+```
+
+I will use a linear function or an exponential decay function for the first eigenfunction.
+
+```{r}
+#Identifying the exponential decay function using OLS
+y <- df_phi1$mean
+t <- seq(0,1, length.out = length(y))
+
+dat <- data.frame(t = t, y = y)
+
+fit_exp <- nls(
+  y ~ a * exp(-b * t) + c,
+  data = dat,
+  start = list(
+    a = y[1] - tail(y, 1),
+    b = 3,
+    c = tail(y, 1)
+  )
+)
+
+dat$y_hat <- predict(fit_exp)
+
+plot(t, y, type = "l", lwd = 2)
+lines(t, dat$y_hat, col = "red", lwd = 2)
+legend("topright", legend = c("Observed", "Exp fit"),
+       col = c("black", "red"), lwd = 2)
+
+summary(fit_exp)
+confint(fit_exp)
+
+#Identifying the linear function using OLS
+y <- df_phi1$mean
+t <- seq(0,1, length.out = length(y))
+
+dat_lin <- data.frame(t = t, y = y)
+
+fit_lin <- lm(
+  y ~ t,
+  data = dat_lin
+)
+
+dat_lin$y_hat <- predict(fit_lin)
+
+plot(t, y, type = "l", lwd = 2)
+lines(t, dat_lin$y_hat, col = "red", lwd = 2)
+legend("topright", legend = c("Observed", "lin fit"),
+       col = c("black", "red"), lwd = 2)
+
+summary(fit_lin)
+confint(fit_lin)
+anova(fit_exp, fit_lin)
+
+phi1_pred <- function(t){
+  coef <- as.numeric(coef(fit_exp))
+  return(coef[1] * exp(-1*coef[2] * t) + coef[3])}
+```
+I will use a quadratic function or a cosine function for the first eigenfunction.
+
+```{r}
+# Data
+y <- df_phi2$mean
+t <- seq(0, 1, length.out = length(y))
+dat <- data.frame(t, y)
+
+# Quadratic: y = b0 + b2 t^2
+fit_quad <- nls(
+  y ~ a*(t)^2 + p,
+  data = dat,
+  start = list(a = max(abs(y)), p = 0)
+)
+# Cosine: y = a cos(bt + p)
+fit_cos <- nls(
+  y ~ a * cos(b * t + p),
+  data = dat,
+  start = list(a = max(abs(y)), b = 2*pi, p = 0)
+)
+
+# Predictions
+dat$y_quad <- predict(fit_quad)
+dat$y_cos  <- predict(fit_cos)
+
+# Plot
+plot(t, y, type = "l", lwd = 2)
+lines(t, dat$y_quad, col = "red", lwd = 2)
+lines(t, dat$y_cos, col = "blue", lwd = 2)
+legend("topright",
+       legend = c("Observed", "Quadratic", "Cosine"),
+       col = c("black", "red", "blue"),
+       lwd = 2)
+
+# Output
+summary(fit_quad)
+summary(fit_cos)
+anova(fit_cos, fit_quad)
+
+phi2_pred <- function(t){
+  coef <- as.numeric(coef(fit_cos))
+  return(coef[1] * cos(coef[2] * t + coef[3]))}
+
+```
+Figuring out which cosine function would fit phi3 best
+
+```{r}
+# Data
+y <- df_phi3$mean
+t <- seq(0, 1, length.out = length(y))
+dat <- data.frame(t, y)
+
+# Cosine: y = a cos(bt + p)
+fit_cos2 <- nls(
+  y ~ a * cos(b * t + p),
+  data = dat,
+  start = list(a = max(abs(y)), b = pi, p = 0)
+)
+
+# Predictions
+dat$y_cos  <- predict(fit_cos2)
+
+# Plot
+plot(t, y, type = "l", lwd = 2)
+lines(t, dat$y_cos, col = "blue", lwd = 2)
+legend("topright",
+       legend = c("Observed", "Cosine"),
+       col = c("black", "blue"),
+       lwd = 2)
+
+# Output
+summary(fit_cos2)
+
+phi3_pred <- function(t){
+  coef <- as.numeric(coef(fit_cos2))
+  return(coef[1] * cos(coef[2] * t + coef[3]))}
+
+```
+```{r}
+newGrid <- seq(0, 1, length.out = 95)
+fit_ng <- ConvertSupport(fromGrid = ddip_fpca$workGrid,
+                                      toGrid = newGrid,
+                                      phi = ddip_fpca$phi)
+
+dat_phi <- as_tibble(cbind(phi1 = fit_ng[,1], phi2 = fit_ng[,2], phi3 = fit_ng[,3],
+                           t = round(newGrid, 3)))
+```
+
+```{r}
+library(lme4)
+
+ddip_sub <- ddip %>%
+  dplyr::filter(id_indiv %in% dyad_ids_with_suffix & day > 0) %>% 
+  dplyr::select(id_indiv, day, pa_gral, na_gral, pa_rel, na_rel) %>%
+  mutate(
+    max_day = max(day),
+    min_day = min(day),
+    time = (day-min_day)/(max_day-min_day),
+    id = id_indiv
+  ) %>%
+  dplyr::select(id, time, na_gral)
+
+ddip_final <- ddip_sub %>%
+  group_by(id) %>%
+  mutate(
+    t = round(time, 3)
+  ) %>% left_join(dat_phi, by = "t") %>%
+  ungroup()
+
+
+# Fit linear + exp model with random intercepts & slopes
+full_model <- lmer(
+  na_gral ~ 
+    1 + phi1_pred(t) + phi2_pred(t) + phi3_pred(t) + 
+    (1 + phi1_pred(t) + phi2_pred(t) + phi3_pred(t) | id),
+  data = ddip_final,
+  REML = TRUE
+)
+
+full_model_fpca <- lmer(
+  na_gral ~ 
+    1 + phi1 + phi2 + phi3 + 
+    (1 + phi1 + phi2 + phi3 | id),
+  data = ddip_final,
+  REML = TRUE
+)
+
+summary(full_model)
+summary(full_model_fpca)
+
+fit_null <- lmer(
+  na_gral ~ 1 + (1 | id),
+  data = ddip_final,
+  REML = TRUE
+)
+
+#McFadden's pseudo r^2
+1 - (logLik(full_model)/logLik(fit_null))
+1 - (logLik(full_model_fpca)/logLik(fit_null))
+
+anova(fit_null, full_model_fpca)
+```
+```{r}
+ddip_wide <- ddip_final %>%
+  dplyr::select(id, t, na_gral) %>%
+  pivot_wider(
+    names_from = t,
+    values_from = na_gral,
+    names_prefix = "t_"
+  ) %>%
+  filter(rowSums(!is.na(across(-id))) >= 2)%>%
+  {
+    df <- .
+    keep_cols <- colSums(!is.na(df[ , -1])) >= 2
+    df <- df[ , c(TRUE, keep_cols)]  # TRUE keeps id
+    df
+  } %>%
+  dplyr::select(-id)
+
+dat_phi_1 <- dat_phi[-95,]
+
+loading0 <- rep(1,nrow(dat_phi_1))
+loading1 <- dat_phi_1$phi1
+loading2 <- dat_phi_1$phi2
+
+dat_lav <- as.data.frame(ddip_wide)
+colnames(dat_lav) <- paste0("y", 1:nrow(dat_phi_1))
+l0 <- paste0(loading0, "*y", 1:nrow(dat_phi_1), collapse = " + ")
+l1 <- paste0(loading1, "*y", 1:nrow(dat_phi_1), collapse = " + ")
+l2 <- paste0(loading2, "*y", 1:nrow(dat_phi_1), collapse = " + ")
+
+growth_mod <- paste0("
+  eta0 =~ ", l0, "
+  eta1 =~ ", l1, "
+  eta2 =~ ", l2, "
+
+  # latent variances & covariance
+  eta0 ~~ eta0
+  eta1 ~~ eta1
+  eta2 ~~ eta2
+  eta0 ~~ eta1
+  eta0 ~~ eta2
+  eta1 ~~ eta2
+
+  # constant residual variance across time
+  ", paste0(colnames(dat_lav), " ~~ vare*", colnames(dat_lav), collapse = "\n"), "
+")
+
+fit <- growth(
+  model = growth_mod,
+  data  = dat_lav,
+  missing = "fiml", 
+  em.h1.iter.max = 10000 
+)
+
+summary(fit, standardized = TRUE, fit.measures = TRUE)
+```
+

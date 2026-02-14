@@ -4,162 +4,22 @@ author: "Suryadyuti Baral"
 date: "`r Sys.Date()`"
 output: html_document
 ---
-```{r}
-bin_time_matrix <- function(Y, time_old, time_new, check = FALSE) {
-  
-  stopifnot(length(time_old) == ncol(Y))
-  
-  time_new <- sort(time_new)
-  
-  # define bin breaks
-  breaks <- c(time_new, Inf)
-  
-  # assign each old time to a bin index
-  bin_index <- findInterval(time_old, breaks, rightmost.closed = FALSE)
-  
-  # map to actual bin labels
-  bin_label <- ifelse(bin_index == 0, NA, time_new[bin_index])
-  
-  # optional diagnostic
-  if (check) {
-    valid <- !is.na(bin_label)
-    example_label <- unique(bin_label[valid])[1]
-    
-    cat("Example binning check:\n")
-    cat("time_new bin =", example_label, "\n")
-    cat("time_old values mapped to this bin:\n")
-    print(time_old[bin_label == example_label])
-    cat("\n")
-  }
-  
-  # aggregate within bins
-  Y_binned <- sapply(time_new, function(t) {
-    cols <- which(bin_label == t)
-    
-    if (length(cols) == 0) {
-      return(rep(NA_real_, nrow(Y)))
-    }
-    
-    m <- rowMeans(Y[, cols, drop = FALSE], na.rm = TRUE)
-    m[is.nan(m)] <- NA_real_
-    m
-  })
-  
-  colnames(Y_binned) <- time_new
-  rownames(Y_binned) <- rownames(Y)
-  
-  return(Y_binned)
-}
 
-
-
-train_test_split <- function(Y, prop_train = 0.5) {
-  is_vector <- is.null(dim(Y))
-  
-  if (is_vector) {
-    n_subj <- length(Y)
-    idx <- sample(seq_len(n_subj))
-    
-    n_train <- floor(prop_train * n_subj)
-    train_idx <- idx[1:n_train]
-    test_idx  <- idx[(n_train + 1):n_subj]
-    
-    train <- Y[train_idx]
-    test  <- Y[test_idx]
-    
-  } else {
-    n_subj <- nrow(Y)
-    idx <- sample(seq_len(n_subj))
-    
-    n_train <- floor(prop_train * n_subj)
-    train_idx <- idx[1:n_train]
-    test_idx  <- idx[(n_train + 1):n_subj]
-    
-    train <- Y[train_idx, , drop = FALSE]
-    test  <- Y[test_idx,  , drop = FALSE]
-  }
-  
-  list(
-    train = train,
-    test  = test,
-    train_idx = train_idx,
-    test_idx  = test_idx
-  )
-}
-
-
-introduce_missingness <- function(Y, missingness = 0.1, full = TRUE) {
-  # Y: matrix of size (n_subjects × n_timepoints) OR vector
-  # missingness: proportion of time points to be set missing
-  # full: if TRUE → induce missingness across entire dataset
-  #       if FALSE → induce missingness per subject
-  
-  Y_missing <- Y
-  is_vector <- is.null(nrow(Y))
-  
-  if (is_vector) {
-    # vector case
-    n_subj <- 1
-    n_time <- length(Y)
-  } else {
-    n_subj <- nrow(Y)
-    n_time <- ncol(Y)
-  }
-  
-  if (full) {
-    # ---- Full dataset missingness ----
-    total_points <- n_subj * n_time
-    n_missing <- ceiling(missingness * total_points)
-    
-    # Randomly select global positions
-    miss_idx <- sample(total_points, n_missing, replace = FALSE)
-    
-    # Convert to matrix indices
-    if (is_vector) {
-      Y_missing[miss_idx] <- NA
-    } else {
-      row_idx <- ((miss_idx - 1) %% n_subj) + 1
-      col_idx <- ((miss_idx - 1) %/% n_subj) + 1
-      Y_missing[cbind(row_idx, col_idx)] <- NA
-    }
-    
-  } else {
-    # ---- Subject-by-subject missingness ----
-    for (i in 1:n_subj) {
-      n_missing <- ceiling(missingness * n_time)
-      miss_idx <- sample(1:n_time, n_missing, replace = FALSE)
-      
-      if (is_vector) {
-        Y_missing[miss_idx] <- NA
-      } else {
-        Y_missing[i, miss_idx] <- NA
-      }
-    }
-  }
-  
-  return(Y_missing)
-}
-
-LyLt_to_Y <- function(Ly, Lt, time) {
-  
-  n_subj <- length(Ly)
-  n_time <- length(time)
-  
-  Y_quad <- matrix(NA_real_, ncol = n_time, nrow = n_subj)
-  
-  for (i in seq_len(n_subj)) {
-    idx <- match(Lt[[i]], time)
-    Y_quad[i, idx] <- Ly[[i]]
-  }
-  
-  Y_quad
-}
-
-```
-
+# Dependencies
 ```{r}
 library(fda)
+library(fdapace)
+library(ggplot2)
+library(lavaan)
+library(tidyr)
+library(dplyr)
+library(lme4)
+library(MASS)
+library(purrr)
+source("Rfunctions_gcm_fpca.R")
+```
 
+```{r eval=FALSE, include=FALSE}
 Ly_ht <- lapply(seq_len(ncol(fda::growth$hgtf)), function(i) fda::growth$hgtf[,i])
 Lt_ht <- lapply(seq_len(ncol(fda::growth$hgtf)), function(i) (fda::growth$age - min(fda::growth$age))/(max(fda::growth$age - min(fda::growth$age))))
 fpca_ht <- FPCA(Ly_ht, Lt_ht)
@@ -171,17 +31,15 @@ fit_ng_ht <- ConvertSupport(fromGrid = fpca_ht$workGrid,
 matplot(fit_ng_ht[,1:2], type = "l")
 ```
 
+# Parameters
+
 ```{r}
-library(fdapace)
-library(ggplot2)
-library(lavaan)
 set.seed(12)
 
-# Parameters
+# Relevant parameters to be modified
 n_subj <- 500
 time <- seq(0, 1, length.out = 12)
-n_time <- length(time)
-missingness = .2
+rho_ss2 <- 0.8     # correlation between slope and slope 2
 
 # ----- Functions -------
 #f1_t <- sqrt(48/7) * time - (3/4) * (sqrt(48/7))
@@ -190,8 +48,15 @@ missingness = .2
 #f1_t <- fit_ng_ht[,1]
 #f2_t <- fit_ng_ht[,2]
 
-f1_t <- time
-f2_t <- sin(2*pi*time)
+f1_t <- sqrt(12) * time - sqrt(12)/2
+f2_t <- rep(1, n_time)
+```
+
+
+# The Rest
+```{r}
+n_time <- length(time)
+missingness = .2
 
 # ----- fixed effects -----
 beta_s <- 0
@@ -200,7 +65,6 @@ beta_s2 <- 0
 # ----- Random effects -----
 sigma_s <- 1   # SD of random slope
 sigma_s2 <- 1  # SD of random slope for quadratic slope
-rho_ss2 <- 0.8     # correlation between slope and slope 2
 
 Sigma <- matrix(c(sigma_s^2, rho_ss2 * sigma_s * sigma_s2,
                   rho_ss2 * sigma_s * sigma_s2, sigma_s2^2), 2, 2)
@@ -278,6 +142,18 @@ fit_ng <- ConvertSupport(fromGrid = fpca_quad$workGrid,
                                       phi = fpca_quad$phi)
 plot(fpca_quad)
 ```
+```{r eval=FALSE, include=FALSE}
+# ----- Apply FPCA -----
+Ly_quad_c <- lapply(seq_len(nrow(Y_quad)), function(i) Y_quad[i,] - mean(Y_quad[i,], na.rm = TRUE))
+Lt_quad <- lapply(seq_len(nrow(Y_quad)), function(i) time)
+
+fpca_quad_c <- FPCA(Ly_quad_c, Lt_quad)
+fit_ng_c <- ConvertSupport(fromGrid = fpca_quad_c$workGrid,
+                                      toGrid = time,
+                                      phi = fpca_quad_c$phi)
+plot(fpca_quad_c)
+```
+
 ```{r}
 Y_test <- Y_quad_split$test
 loading1 <- fit_ng[,1]
@@ -312,9 +188,6 @@ summary(fit, standardized = TRUE, fit.measures = TRUE)
 ```
 
 ```{r}
-library(tidyr)
-library(dplyr)
-library(lme4)
 dat_long <- as.data.frame(Y_test) |>
   mutate(id = seq_len(nrow(Y_test))) |>
   pivot_longer(
@@ -340,6 +213,95 @@ fit_null <- lmer(
 
 #McFadden's pseudo r^2
 1 - (logLik(fit_lmer)/logLik(fit_null))
+```
+```{r eval=FALSE, include=FALSE}
+Y_test <- Y_quad_split$test
+loading1 <- rep(1, n_time)
+loading2 <- fit_ng_c[,1]
+
+dat_lav <- as.data.frame(Y_test)
+colnames(dat_lav) <- paste0("y", 1:n_time)
+l1 <- paste0(loading1, "*y", 1:n_time, collapse = " + ")
+l2 <- paste0(loading2, "*y", 1:n_time, collapse = " + ")
+
+growth_mod_c <- paste0("
+  eta1 =~ ", l1, "
+  eta2 =~ ", l2, "
+
+  # latent variances & covariance
+  eta1 ~~ eta1
+  eta2 ~~ eta2
+  eta1 ~~ eta2
+
+  # constant residual variance across time
+  ", paste0(colnames(dat_lav), " ~~ vare*", colnames(dat_lav), collapse = "\n"), "
+")
+
+fit_c <- growth(
+  model = growth_mod_c,
+  data  = dat_lav,
+  missing = "fiml", 
+  em.h1.iter.max = 10000 
+)
+
+summary(fit_c, standardized = TRUE, fit.measures = TRUE)
+```
+
+```{r eval=FALSE, include=FALSE}
+loading1 <- rep(1, n_time)
+loading2 <- seq(0, 1, length.out = n_time)
+l1 <- paste0(loading1, "*y", 1:n_time, collapse = " + ")
+l2 <- paste0(loading2, "*y", 1:n_time, collapse = " + ")
+
+growth_mod_param <- paste0("
+  eta1 =~ ", l1, "
+  eta2 =~ ", l2, "
+
+  # latent variances & covariance
+  eta1 ~~ eta1
+  eta2 ~~ eta2
+  eta1 ~~ eta2
+
+  # constant residual variance across time
+  ", paste0(colnames(dat_lav), " ~~ vare*", colnames(dat_lav), collapse = "\n"), "
+")
+
+fit_param <- growth(
+  model = growth_mod_param,
+  data  = dat_lav,
+  missing = "fiml", 
+  em.h1.iter.max = 10000 
+)
+
+summary(fit_param, standardized = TRUE, fit.measures = TRUE)
+```
+
+```{r eval=FALSE, include=FALSE}
+dat_long <- as.data.frame(Y_test) |>
+  mutate(id = seq_len(nrow(Y_test))) |>
+  pivot_longer(
+    cols = -id,
+    names_to = "time",
+    values_to = "y"
+  )
+
+dat_long$f1 <- rep(fit_ng_c[,1], nrow(Y_test))
+
+fit_lmer_c <- lmer(
+  y ~ 1 + f1 + (1 + f1 | id),
+  data = dat_long,
+  REML = TRUE
+)
+
+fit_null <- lmer(
+  y ~ 1 + (1 | id),
+  data = dat_long,
+  REML = TRUE
+)
+
+#McFadden's pseudo r^2
+1 - (logLik(fit_lmer_c)/logLik(fit_null))
+anova(fit_null,fit_lmer_c)
 ```
 
 

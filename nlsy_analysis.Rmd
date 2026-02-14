@@ -8,7 +8,7 @@ output: html_document
 ```{r}
 library(fdapace)
 nlsy <- read.csv("nlsy.csv", na.strings = ".")
-age_grid <- seq(6, 14, by = 2)
+age_grid <- seq(6, 14, by = 1)
 df_read <- nlsy[!is.na(nlsy$read),]
 split_df <- split(df_read, df_read$id)
 Ly <- lapply(split_df, function(d) d$read)
@@ -27,6 +27,8 @@ matplot(fit_ng_read[,1:2], type = "l")
 
 ```{r}
 Y <- LyLt_to_Y(Ly, Lt, time)
+
+set.seed(1)
 Y_split <- train_test_split(Y) 
 Y_tr <- Y_split$train
 
@@ -66,7 +68,7 @@ ggplot(
 ```
 ```{r}
 # ----- Apply FPCA -----
-Ly_tr <- lapply(seq_len(nrow(Y_tr)), function(i) Y_tr[i,])
+Ly_tr <- lapply(seq_len(nrow(Y_tr)), function(i) Y_tr[i,] - mean(Y_tr[i,], na.rm = TRUE))
 Lt_tr <- lapply(seq_len(nrow(Y_tr)), function(i) time)
 
 fpca_tr <- FPCA(Ly_tr, Lt_tr)
@@ -80,19 +82,28 @@ matplot(fit_ng_tr[,1:2], type = "l")
 Y_test <- Y_split$test
 Y_bin <- bin_time_matrix(Y_test, fpca_tr$obsGrid, age_grid, check = TRUE)
 
+loading0 <- rep(1,length(age_grid))
 loading1 <- fit_ng_tr[,1]
 loading2 <- fit_ng_tr[,2]
 
 dat_lav <- as.data.frame(Y_bin)
 colnames(dat_lav) <- paste0("y", 1:length(age_grid))
+l0 <- paste0(loading0, "*y", 1:length(age_grid), collapse = " + ")
 l1 <- paste0(loading1, "*y", 1:length(age_grid), collapse = " + ")
 l2 <- paste0(loading2, "*y", 1:length(age_grid), collapse = " + ")
 
 growth_mod <- paste0("
+  eta0 =~ ", l0, "
   eta1 =~ ", l1, "
+  eta2 =~ ", l2, "
 
   # latent variances & covariance
+  eta0 ~~ eta0
   eta1 ~~ eta1
+  eta2 ~~ eta2
+  eta0 ~~ eta1
+  eta0 ~~ eta2
+  eta1 ~~ eta2
 
   # constant residual variance across time
   ", paste0(colnames(dat_lav), " ~~ vare*", colnames(dat_lav), collapse = "\n"), "
@@ -109,23 +120,40 @@ summary(fit, standardized = TRUE, fit.measures = TRUE)
 ```
 
 ```{r}
-growth_mod_lin <- paste0("
-  eta1 =~ 0*y1 + 0.25*y2 + 0.5*y3 + 0.75*y4 + 1*y5
+loading0 <- rep(1,length(age_grid))
+loading1 <- seq(0,1, length.out = length(age_grid))
+loading2 <- seq(0,1, length.out = length(age_grid))^2
+
+dat_lav <- as.data.frame(Y_bin)
+colnames(dat_lav) <- paste0("y", 1:length(age_grid))
+l0 <- paste0(loading0, "*y", 1:length(age_grid), collapse = " + ")
+l1 <- paste0(loading1, "*y", 1:length(age_grid), collapse = " + ")
+l2 <- paste0(loading2, "*y", 1:length(age_grid), collapse = " + ")
+
+growth_mod_param <- paste0("
+  eta0 =~ ", l0, "
+  eta1 =~ ", l1, "
+  eta2 =~ ", l2, "
 
   # latent variances & covariance
+  eta0 ~~ eta0
   eta1 ~~ eta1
+  eta2 ~~ eta2
+  eta0 ~~ eta1
+  eta0 ~~ eta2
+  eta1 ~~ eta2
 
   # constant residual variance across time
   ", paste0(colnames(dat_lav), " ~~ vare*", colnames(dat_lav), collapse = "\n"), "
 ")
 
-fitq <- growth(
-  model = growth_mod_lin,
+fit <- growth(
+  model = growth_mod_param,
   data  = dat_lav,
   missing = "fiml", 
   em.h1.iter.max = 10000 
 )
 
-summary(fitq, standardized = TRUE, fit.measures = TRUE)
+summary(fit, standardized = TRUE, fit.measures = TRUE)
 ```
 
