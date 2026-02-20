@@ -28,17 +28,20 @@ library(tidyverse)
 n_vals   <- c(100, 200, 500)
 tp_vals  <- c(12, 30)
 cor_vals <- c(0, 0.3, 0.8)
+eps_vals <- c(.25, .5, 1)
 
 conditions <- expand_grid(
   n_subj      = n_vals,
   time_points = tp_vals,
-  cor_ss      = cor_vals
+  cor_ss      = cor_vals,
+  sig_eps   = eps_vals
 ) %>%
   mutate(
     cond_name = paste0(
       "n", n_subj,
       "_tp", time_points,
-      "_cor", cor_ss
+      "_cor", cor_ss,
+      "_eps", sig_eps
     )
   )
 
@@ -55,23 +58,77 @@ mc_results <- map_dfr(1:n_mc, function(iter){
       n  <- conditions$n_subj[i]
       tp <- conditions$time_points[i]
       cs <- conditions$cor_ss[i]
+      eps<- conditions$sig_eps[i]
 
       time <- seq(0, 1, length.out = tp)
 
-      f1_t <- sqrt(48/7) * time - (3/4) * (sqrt(48/7))
-      f2_t <- sqrt(5) * time^2
+      f1_t <- sqrt(12) * time - sqrt(12)/2
+      f2_t <- rep(1, tp)
 
-      run_mc(iter, n, tp, cs, f1_t, f2_t)
+      run_mc(iter, n, tp, cs, eps, f1_t, f2_t)
     }
   )
 
   names(cond_outputs) <- conditions$cond_name
+  
+  if (iter %% 2 == 0) 
+    message(sprintf("[%s] Done: iter %d", 
+                    format(Sys.time(), "%H:%M:%S"), iter))
 
   tibble(iter = iter) %>%
     bind_cols(as_tibble(cond_outputs))
 })
 
+mc_results$n100_tp12_cor0_eps0.25[[1]]
 ```
+
+
+
+```{r}
+example <- mc_results$n100_tp12_cor0_eps0.25
+metric_names <- names(example$fit_est)
+
+condition_names <- names(mc_results)[-1]
+
+summary_list <- lapply(
+  condition_names,
+  summarize_condition,
+  mc_results = mc_results,
+  metric_names = metric_names
+)
+
+names(summary_list) <- condition_names
+
+summary_df <- as.data.frame(summary_list)
+summary_df <- tibble::rownames_to_column(summary_df, "metric")
+```
+
+
+```{r eval=FALSE, include=FALSE}
+saveRDS(mc_results, "param_fn_mc_results.R")
+saveRDS(summary_df, "param_fn_dataframe.R")
+```
+
+```{r}
+summary_df <- readRDS("param_fn_dataframe.R")
+summary_df
+```
+
+```{r}
+plot_simulation_metric(
+  summary_df = summary_df,
+  n_mc = n_mc,
+  metric = "cfi",
+  abline_value = .95,
+  main_title = "Monte Carlo Performance: CFI"
+)
+```
+
+
+
+
+
+
 
 #Condition: Non-parametric Functions
 

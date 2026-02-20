@@ -10,7 +10,8 @@
 library(shiny)
 library(MASS)
 library(plotly)
-
+library(fdapace)
+library(pracma)
 ui <- fluidPage(
   
   titlePanel("Covariance Topology Explorer"),
@@ -31,8 +32,7 @@ ui <- fluidPage(
       sliderInput("n_time", "Time points",
                   min = 5, max = 500, value = 100, step = 5),
       
-      numericInput("beta0", "β₀", value = 1),
-      numericInput("beta1", "β₁", value = 2),
+      numericInput("beta", "β", value = 1),
       numericInput("sigma_eps", "Noise SD", value = 0.5, min = 0),
       
       textInput(
@@ -41,118 +41,164 @@ ui <- fluidPage(
         value = "time"
       ),
       
+      checkboxInput("Orthonormalize", "Orthonormalize", FALSE), 
+      
       tags$details(
         tags$summary("Random effects"),
-        numericInput("sigma_b0", "Var(b₀)", value = 1.0, min = 0),
-        numericInput("sigma_b1", "Var(b₁)", value = 1.0, min = 0),
-        numericInput("sigma_b01", "Cov(b₀,b₁)", value = 0)
+        numericInput("sigma_b", "Var(b)", value = 1.0, min = 0)
       ),
       
       actionButton("simulate", "Update", class = "btn-primary btn-sm")
     ),
     
     mainPanel(
-      plotlyOutput("cov_plot", height = "600px")
+      tabsetPanel(
+    
+        tabPanel(
+          "Covariance Surface",
+          plotlyOutput("cov_plot", height = "600px")
+        ),
+    
+        tabPanel(
+          "FPCA Eigenfunction",
+          checkboxInput("compute_fpca", "Compute FPCA", value = FALSE),
+          plotlyOutput("eig_plot", height = "600px")
+        )
+    
+      )
     )
+
     
   )
 )
 
-
 server <- function(input, output) {
 
-  sim_data <- eventReactive(input$simulate, {
+sim_data <- eventReactive(input$simulate, {
 
-    set.seed(123)
+  set.seed(123)
 
-    # Time grid
-    time <- seq(0, 1, length.out = input$n_time)
-    
-    # Safely evaluate user function
-    f_time <- tryCatch({
-      eval(parse(text = input$f_t), envir = list(time = time))
-    }, error = function(e) {
-      warning("Invalid function. Using time instead.")
-      time
-    })
-    
-    # Ensure correct length
-    if (length(f_time) != input$n_time) {
-      f_time <- time
-    }
-    
+  time <- seq(0, 1, length.out = input$n_time)
 
-    # Random effects covariance
-    Sigma_b <- matrix(
-      c(input$sigma_b0,
-        input$sigma_b01,
-        input$sigma_b01,
-        input$sigma_b1),
-      nrow = 2
-    )
-
-    # Random effects
-    b <- MASS::mvrnorm(input$n_subj, mu = c(0, 0), Sigma = Sigma_b)
-
-    # Generate curves
-    X <- matrix(NA, input$n_subj, input$n_time)
-
-    for (i in seq_len(input$n_subj)) {
-      X[i, ] <-
-        (input$beta0 + b[i, 1]) +
-        (input$beta1 + b[i, 2]) * f_time +
-        rnorm(input$n_time, sd = input$sigma_eps)
-    }
-
-    # Center
-    mu_hat <- colMeans(X)
-    X_centered <- sweep(X, 2, mu_hat)
-
-    # Sample covariance
-    G_hat <- t(X_centered) %*% X_centered / input$n_subj
-
-    # Long format for plotting
-    cov_df <- expand.grid(
-      t1 = time,
-      t2 = time
-    )
-
-    cov_df$cov <- as.vector(G_hat)
-
-    cov_df
+  f_time <- tryCatch({
+    eval(parse(text = input$f_t), envir = list(time = time))
+  }, error = function(e) {
+    time
   })
 
-  output$cov_plot <- renderPlotly({
+  if (length(f_time) != input$n_time) {
+    f_time <- time
+  }
+  
+  if(input$Orthonormalize){
+    f_time <- f_time/sqrt(trapz(time, f_time^2))
+  } else{
+    f_time <- f_time
+  }
 
-    cov_df <- sim_data()
+  b <- rnorm(input$n_subj, mean = 0, sd = input$sigma_b)
 
-    cmax <- max(abs(cov_df$cov))
+  X <- matrix(NA, input$n_subj, input$n_time)
 
-plot_ly(
-  data = cov_df,
-  x = ~t1, y = ~t2, z = ~cov,
-  type = "scatter3d",
-  mode = "markers",
-  marker = list(
-    size = 2,
-    opacity = 0.6,
-    color = ~cov,
-    colorscale = "Viridis",
-    cmin = min(cov_df$cov),
-    cmax = max(cov_df$cov),
-    showscale = TRUE,
-    colorbar = list(title = "Covariance")
+  for (i in seq_len(input$n_subj)) {
+    X[i, ] <-
+      (input$beta + b[i]) * f_time +
+      rnorm(input$n_time, sd = input$sigma_eps)
+  }
+
+  mu_hat <- colMeans(X)
+  X_centered <- sweep(X, 2, mu_hat)
+
+  G_hat <- t(X_centered) %*% X_centered / input$n_subj
+
+  cov_df <- expand.grid(
+    t1 = time,
+    t2 = time
   )
-) %>%
-      layout(
-        title = "Empirical Covariance Point Cloud",
-        scene = list(
-          xaxis = list(title = "Time t"),
-          yaxis = list(title = "Time s"),
-          zaxis = list(title = "Covariance")
+
+  cov_df$cov <- as.vector(G_hat)
+
+  # ----- FPCA -----
+  Ly <- lapply(seq_len(nrow(X)), function(i) X[i, ])
+  Lt <- lapply(seq_len(nrow(X)), function(i) time)
+  
+  fpca_fit <- NULL
+
+  if (input$compute_fpca) {
+    Ly <- lapply(seq_len(nrow(X)), function(i) X[i, ])
+    Lt <- lapply(seq_len(nrow(X)), function(i) time)
+  
+    fpca_fit <- FPCA(Ly, Lt, optns = list(methodMuCovEst = "smooth", shrink =  TRUE, methodXi = "IN", error = TRUE, dataType = "DenseWithMV"))
+  }
+
+  list(
+    cov_df = cov_df,
+    time = time,
+    fpca = fpca_fit,
+    f_time = f_time
+  )
+})
+
+output$eig_plot <- renderPlotly({
+
+  sim <- sim_data()
+  time <- sim$time
+  f_time <- sim$f_time
+  p <- plot_ly()
+  
+    p <- p %>%
+    add_lines(
+      x = time,
+      y = f_time,
+      name = "f(t)",
+      line = list(dash = "dash")
+    )
+    
+    if (is.null(sim$fpca)) {
+    
+    return(
+      p %>%
+        layout(
+          title = "FPCA Not Computed",
+          xaxis = list(title = "Time"),
+          yaxis = list(title = "Value")
         )
+    )
+  }
+    
+  fpca_fit <- sim$fpca
+  phi_mat <- fpca_fit$phi[, 1, drop = FALSE]
+  
+  p <- p %>%
+      add_lines(
+        x = time,
+        y = phi_mat,
+        name = paste0("Eigenfunction ", 1,
+                      " (λ=", round(fpca_fit$lambda[1], 3), ")")
       )
-  })
+  p %>%
+    layout(
+      title = "FPCA Eigenfunctions",
+      xaxis = list(title = "Time"),
+      yaxis = list(title = "Eigenfunction Value")
+    )
+})
+output$cov_plot <- renderPlotly({ 
+  cov_df <- sim_data() 
+  cmax <- max(abs(cov_df$cov_df)) 
+  plot_ly(data = cov_df$cov_df, 
+          x = ~t1, y = ~t2, z = ~cov, 
+          type = "scatter3d", mode = "markers", 
+          marker = list( size = 2, opacity = 0.6, 
+                         color = ~cov, colorscale = "Viridis", 
+                         cmin = min(cov_df$cov), cmax = max(cov_df$cov), 
+                         showscale = TRUE, 
+                         colorbar = list(title = "Covariance") ) ) %>% 
+    layout( title = "Empirical Covariance Point Cloud", 
+            scene = list( xaxis = list(title = "Time t"), 
+                          yaxis = list(title = "Time s"), 
+                          zaxis = list(title = "Covariance") ) ) 
+}) 
 }
 
 shinyApp(ui, server)

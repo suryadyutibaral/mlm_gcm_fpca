@@ -1,3 +1,9 @@
+library(RcppHungarian)
+library(pracma)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
 bin_time_matrix <- function(Y, time_old, time_new, check = FALSE) {
   
   stopifnot(length(time_old) == ncol(Y))
@@ -148,7 +154,7 @@ LyLt_to_Y <- function(Ly, Lt, time) {
   Y_quad
 }
 
-run_mc <- function(iter, n, time_points, cor_ss, f1_t, f2_t){
+run_mc <- function(iter, n, time_points, cor_ss, sigma_eps, f1_t, f2_t){
 
   set.seed(1000 + iter)
 
@@ -173,8 +179,6 @@ run_mc <- function(iter, n, time_points, cor_ss, f1_t, f2_t){
   b_s <- MASS::mvrnorm(n_subj, mu = c(0, 0), Sigma = Sigma)
   s_i  <- b_s[,1]
   s2_i <- b_s[,2]
-
-  sigma_eps <- 0.5
 
   # ----- Generate Data -----
   Y <- matrix(NA, nrow = n_subj, ncol = n_time)
@@ -203,6 +207,9 @@ run_mc <- function(iter, n, time_points, cor_ss, f1_t, f2_t){
 
   loading1 <- fit_ng[,1]
   loading2 <- fit_ng[,2]
+  
+  ise <- compare_efunctions_ise(true_phi = cbind(f1_t, f2_t), est_phi = fit_ng, T = time)$ise
+  names(ise) <- c("ise_f1", "ise_f2")
 
   # ----- Lavaan Setup -----
   dat_lav <- as.data.frame(Y_test)
@@ -253,7 +260,7 @@ run_mc <- function(iter, n, time_points, cor_ss, f1_t, f2_t){
 
   fit_vals <- f$fit[c("cfi","bic","rmsea","logl","npar","df")]
 
-  list(fit_est = c(pe_vals, vare_mean, fit_vals), phi = cbind(loading1, loading2))
+  list(fit_est = c(pe_vals, vare_mean, fit_vals, ise), phi = cbind(loading1, loading2))
 }
 
 
@@ -429,4 +436,237 @@ run_mcmc_np <- function(iter, n, time_points, cor_ss, f1_t, f2_t){
   )
 }
 
+summarize_condition <- function(cond_name, mc_results, metric_names) {
 
+  # Extract all iterations for this condition
+  vals <- lapply(mc_results[[cond_name]], function(x) {
+    if (is.null(x) || all(is.na(x))) {
+      rep(NA, length(metric_names))
+    } else {
+      x[metric_names]
+    }
+  })
+
+  mat <- do.call(rbind, vals)
+
+  means <- colMeans(mat, na.rm = TRUE)
+  sds   <- apply(mat, 2, sd, na.rm = TRUE)
+
+  out <- c(
+    setNames(means, paste0(metric_names, "_mean")),
+    setNames(sds,   paste0(metric_names, "_sd"))
+  )
+
+  return(out)
+}
+
+compare_efunctions_ise <- function(true_phi, est_phi, T = 1:125) {
+
+  if (is.vector(true_phi)) true_phi <- matrix(true_phi, ncol = 1)
+  if (is.vector(est_phi))  est_phi  <- matrix(est_phi,  ncol = 1)
+  
+  n_true <- ncol(true_phi)
+  n_est  <- ncol(est_phi)
+  
+  # Step 1: Compute ISE matrix
+
+  ise_matrix <- matrix(NA, nrow = n_true, ncol = n_est)
+  sign_matrix <- matrix(1, nrow = n_true, ncol = n_est)
+  
+  for (i in 1:n_true) {
+    for (j in 1:n_est) {
+      
+      diff_pos <- (est_phi[, j] - true_phi[, i])^2
+      diff_neg <- (-est_phi[, j] - true_phi[, i])^2
+      
+      ise_pos <- trapz(T, diff_pos)
+      ise_neg <- trapz(T, diff_neg)
+      
+      if (ise_neg < ise_pos) {
+        ise_matrix[i, j]  <- ise_neg
+        sign_matrix[i, j] <- -1
+      } else {
+        ise_matrix[i, j]  <- ise_pos
+        sign_matrix[i, j] <- 1
+      }
+    }
+  }
+  
+  # Step 2: Optimal assignment
+
+  assignment <- HungarianSolver(ise_matrix)
+  
+  results <- lapply(1:n_true, function(i) {
+    
+    j <- assignment$pairs[i, 2]
+    sgn <- sign_matrix[i, j]
+    
+    est_aligned <- sgn * est_phi[, j]
+    true_vec    <- true_phi[, i]
+    
+    r2 <- summary(lm(est_aligned ~ true_vec))$r.squared
+    
+    data.frame(
+      true_phi_column = i,
+      best_match_est_phi_column = j,
+      sign = sgn,
+      ise = ise_matrix[i, j],
+      r_squared = r2
+    )
+  })
+  
+  match_results <- do.call(rbind, results)
+  
+  return(match_results)
+}
+
+get_metric <- function(cond_name, summary_df, n_mc, metric) {
+  
+  mean_val <- summary_df[
+    summary_df$metric == paste0(metric,"_mean"),
+    cond_name
+  ]
+  
+  sd_val <- summary_df[
+    summary_df$metric == paste0(metric,"_sd"),
+    cond_name
+  ]
+  
+  ci <- 1.96 * as.numeric(sd_val) / sqrt(n_mc)
+  
+  list(
+    mean = as.numeric(mean_val),
+    lower = as.numeric(mean_val) - ci,
+    upper = as.numeric(mean_val) + ci
+  )
+}
+
+plot_simulation_metric <- function(summary_df,
+                                      n_mc,
+                                      metric,
+                                      abline_value = NULL,
+                                      main_title = NULL) {
+  
+  get_metric_vals <- function(cond_name) {
+    
+    mean_val <- summary_df[
+      summary_df$metric == paste0(metric, "_mean"),
+      cond_name
+    ]
+    
+    sd_val <- summary_df[
+      summary_df$metric == paste0(metric, "_sd"),
+      cond_name
+    ]
+    
+    ci <- 1.96 * as.numeric(sd_val) / sqrt(n_mc)
+    
+    data.frame(
+      condition = cond_name,
+      mean  = as.numeric(mean_val),
+      lower = as.numeric(mean_val) - ci,
+      upper = as.numeric(mean_val) + ci
+    )
+  }
+  
+  ### Define conditions
+  panels <- list(
+    n = list(
+      conds = c(
+        "n100_tp30_cor0_eps0.25",
+        "n200_tp30_cor0_eps0.25",
+        "n500_tp30_cor0_eps0.25"
+      ),
+      x_vals = c(100,200,500),
+      xlab = "Sample Size (n)"
+    ),
+    
+    tp = list(
+      conds = c(
+        "n500_tp12_cor0_eps0.25",
+        "n500_tp30_cor0_eps0.25"
+      ),
+      x_vals = c(12,30),
+      xlab = "Time Points"
+    ),
+    
+    cor = list(
+      conds = c(
+        "n500_tp30_cor0_eps0.25",
+        "n500_tp30_cor0.3_eps0.25",
+        "n500_tp30_cor0.8_eps0.25"
+      ),
+      x_vals = c(0,0.3,0.8),
+      xlab = "RI–S Covariance"
+    ),
+    
+    eps = list(
+      conds = c(
+        "n500_tp30_cor0_eps0.25",
+        "n500_tp30_cor0_eps0.5",
+        "n500_tp30_cor0_eps1"
+      ),
+      x_vals = c(0.25,0.5,1),
+      xlab = "Measurement Error"
+    )
+  )
+  
+  ### Build long dataframe
+  plot_df <- bind_rows(lapply(names(panels), function(p) {
+    
+    panel_info <- panels[[p]]
+    
+    df <- bind_rows(lapply(panel_info$conds, get_metric_vals))
+    df$x <- panel_info$x_vals
+    df$panel <- panel_info$xlab
+    
+    df
+  }))
+  
+  ### Nice color palette
+  palette_cols <- c(
+    "#0072B2",  # blue
+    "#D55E00",  # orange
+    "#009E73",  # green
+    "#CC79A7"   # purple
+  )
+  
+  p <- ggplot(plot_df,
+              aes(x = x,
+                  y = mean,
+                  group = panel,
+                  color = panel)) +
+    
+    geom_line(size = 1.1) +
+    geom_point(size = 3) +
+    
+    geom_errorbar(aes(ymin = lower, ymax = upper),
+                  width = 0,
+                  size = .8) +
+    
+    facet_wrap(~panel, scales = "free_x", ncol = 2) +
+    
+    scale_color_manual(values = palette_cols) +
+    
+    labs(
+      x = NULL,
+      y = toupper(metric),
+      title = main_title
+    ) +
+    
+    theme_minimal(base_size = 13) +
+    theme(
+      legend.position = "none",
+      strip.text = element_text(face = "bold", size = 12),
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      panel.grid.minor = element_blank()
+    )
+  
+  if (!is.null(abline_value)) {
+    p <- p + geom_hline(yintercept = abline_value,
+                        linetype = "dashed",
+                        size = 1)
+  }
+  
+  return(p)
+}
