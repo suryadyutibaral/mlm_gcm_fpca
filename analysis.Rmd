@@ -11,19 +11,22 @@ library(fdapace)
 library(ggplot2)
 library(lavaan)
 library(tidyr)
+library(tidyverse)
 library(dplyr)
 library(lme4)
 library(MASS)
 library(purrr)
+library(furrr)
+library(future)
+
+plan(multisession, workers = parallel::detectCores() - 4)
 source("Rfunctions_gcm_fpca.R")
 
 ```
 
 # Condition: Parametric Functions
-```{r message=FALSE, warning=FALSE}
-set.seed(12)
-
-library(tidyverse)
+```{r}
+begin <- Sys.time()
 
 n_vals   <- c(100, 200, 500)
 tp_vals  <- c(12, 30)
@@ -45,43 +48,48 @@ conditions <- expand_grid(
     )
   )
 
-n_mc <- 10
+n_mc <- 100
 
-mc_results <- map_dfr(1:n_mc, function(iter){
-
-  # For each condition run the simulation
-  cond_outputs <- map2(
-    seq_len(nrow(conditions)),
-    conditions$cond_name,
-    function(i, cname){
-
-      n  <- conditions$n_subj[i]
-      tp <- conditions$time_points[i]
-      cs <- conditions$cor_ss[i]
-      eps<- conditions$sig_eps[i]
-
-      time <- seq(0, 1, length.out = tp)
-
-      f1_t <- sqrt(12) * time - sqrt(12)/2
-      f2_t <- rep(1, tp)
-
-      run_mc(iter, n, tp, cs, eps, f1_t, f2_t)
-    }
-  )
-
-  names(cond_outputs) <- conditions$cond_name
-  
-  if (iter %% 2 == 0) 
-    message(sprintf("[%s] Done: iter %d", 
-                    format(Sys.time(), "%H:%M:%S"), iter))
-
-  tibble(iter = iter) %>%
-    bind_cols(as_tibble(cond_outputs))
-})
+mc_results <- future_map_dfr(
+  1:n_mc,
+  function(iter){
+    
+    cond_outputs <- map2(
+      seq_len(nrow(conditions)),
+      conditions$cond_name,
+      function(i, cname){
+        
+        n   <- conditions$n_subj[i]
+        tp  <- conditions$time_points[i]
+        cs  <- conditions$cor_ss[i]
+        eps <- conditions$sig_eps[i]
+        
+        time <- seq(0, 1, length.out = tp)
+        
+        f1_t <- sqrt(12) * time - sqrt(12)/2
+        f2_t <- rep(1, tp)
+        
+        tryCatch(suppressWarnings(suppressMessages(run_mc(iter, n, tp, cs, eps, f1_t, f2_t))), 
+                 error = function(e) {NA}
+                 )
+        }
+    )
+    
+    names(cond_outputs) <- conditions$cond_name
+    
+    tibble(iter = iter) %>%
+      bind_cols(as_tibble(cond_outputs))
+  },
+  .options = furrr_options(seed = FALSE)
+)
 
 mc_results$n100_tp12_cor0_eps0.25[[1]]
 ```
 
+```{r}
+end <- Sys.time()
+end - begin
+```
 
 
 ```{r}
@@ -119,48 +127,32 @@ plot_simulation_metric(
   summary_df = summary_df,
   n_mc = n_mc,
   metric = "cfi",
-  abline_value = .95,
+  abline_value = 0.95,
   main_title = "Monte Carlo Performance: CFI"
 )
 ```
 
 
-
-
-
-
-
 #Condition: Non-parametric Functions
 
 ```{r message=FALSE, warning=FALSE}
-set.seed(12)
-
-conditions <- expand_grid(
-  n_subj      = n_vals,
-  time_points = tp_vals,
-  cor_ss      = cor_vals
-) %>%
-  mutate(
-    cond_name = paste0(
-      "n", n_subj,
-      "_tp", time_points,
-      "_cor", cor_ss
-    )
-  )
+begin <- Sys.time()
 
 n_mc <- 100
 
-mc_results_np <- map_dfr(1:n_mc, function(iter){
-
-  # For each condition run the simulation
-  cond_outputs <- map2(
-    seq_len(nrow(conditions)),
-    conditions$cond_name,
-    function(i, cname){
-
-      n  <- conditions$n_subj[i]
-      tp <- conditions$time_points[i]
-      cs <- conditions$cor_ss[i]
+mc_results_np <- future_map_dfr(
+  1:n_mc,
+  function(iter){
+    
+    cond_outputs <- map2(
+      seq_len(nrow(conditions)),
+      conditions$cond_name,
+      function(i, cname){
+        
+        n   <- conditions$n_subj[i]
+        tp  <- conditions$time_points[i]
+        cs  <- conditions$cor_ss[i]
+        eps <- conditions$sig_eps[i]
 
       time <- seq(0, 1, length.out = tp)
 
@@ -176,65 +168,292 @@ mc_results_np <- map_dfr(1:n_mc, function(iter){
       f1_t <- fit_ng_ht[,1]
       f2_t <- fit_ng_ht[,2]
 
-      run_mc_np(iter, n, tp, cs, f1_t, f2_t)
+      tryCatch(suppressWarnings(suppressMessages(run_mc(iter, n, tp, cs, eps, f1_t, f2_t))), 
+                 error = function(e) {NA}
+                 )
     }
   )
+    names(cond_outputs) <- conditions$cond_name
+    
+    tibble(iter = iter) %>%
+      bind_cols(as_tibble(cond_outputs))
+  },
+  .options = furrr_options(seed = FALSE)
+)
 
-  names(cond_outputs) <- conditions$cond_name
+mc_results_np$n100_tp12_cor0_eps0.25[[1]]
+```
 
-  tibble(iter = iter) %>%
-    bind_cols(as_tibble(cond_outputs))
-})
+```{r}
+end <- Sys.time()
+end - begin
+```
 
+
+```{r}
+example <- mc_results_np$n100_tp12_cor0_eps0.25
+metric_names <- names(example$fit_est)
+
+condition_names <- names(mc_results_np)[-1]
+
+summary_list <- lapply(
+  condition_names,
+  summarize_condition,
+  mc_results = mc_results_np,
+  metric_names = metric_names
+)
+
+names(summary_list) <- condition_names
+
+summary_df <- as.data.frame(summary_list)
+summary_df <- tibble::rownames_to_column(summary_df, "metric")
+```
+
+
+```{r eval=FALSE, include=FALSE}
+saveRDS(mc_results_np, "np_param_fn_mc_results.R")
+saveRDS(summary_df, "np_param_fn_dataframe.R")
+```
+
+```{r}
+summary_df <- readRDS("np_param_fn_dataframe.R")
+summary_df
+```
+```{r}
+plot_simulation_metric(
+  summary_df = summary_df,
+  n_mc = n_mc,
+  metric = "cfi",
+  abline_value = 0.85,
+  main_title = "Monte Carlo Performance: cfi"
+)
+```
+```{r}
+tp = 30
+list_best_cond <- mc_results_np$n500_tp30_cor0_eps0.25
+time <- seq(0, 1, length.out = tp)
+
+Ly_ht <- lapply(seq_len(ncol(fda::growth$hgtf)), function(i)
+  fda::growth$hgtf[,i])
+
+Lt_ht <- lapply(seq_len(ncol(fda::growth$hgtf)), function(i)
+  (fda::growth$age - min(fda::growth$age))/(max(fda::growth$age - min(fda::growth$age))))
+
+fpca_ht <- FPCA(Ly_ht, Lt_ht)
+fit_ng_ht <- ConvertSupport(fromGrid = fpca_ht$workGrid,
+                            toGrid = time, phi = fpca_ht$phi)
+
+f1_t <- fit_ng_ht[,1]
+f2_t <- fit_ng_ht[,2]
+
+plot_aligned_efunctions(list_best_cond, f1_t, f2_t, n_mc, T_grid = time)
+```
+
+
+
+
+#Condition: Latent Basis SEM
+
+```{r message=FALSE, warning=FALSE}
+begin <- Sys.time()
+
+n_mc <- 100
+
+mc_results_lb <- future_map_dfr(
+  1:n_mc,
+  function(iter){
+    
+    cond_outputs <- map2(
+      seq_len(nrow(conditions)),
+      conditions$cond_name,
+      function(i, cname){
+        
+        n   <- conditions$n_subj[i]
+        tp  <- conditions$time_points[i]
+        cs  <- conditions$cor_ss[i]
+        eps <- conditions$sig_eps[i]
+
+      time <- seq(0, 1, length.out = tp)
+
+      Ly_ht <- lapply(seq_len(ncol(fda::growth$hgtf)), function(i)
+        fda::growth$hgtf[,i])
+      Lt_ht <- lapply(seq_len(ncol(fda::growth$hgtf)), function(i)
+        (fda::growth$age - min(fda::growth$age))/
+          (max(fda::growth$age - min(fda::growth$age))))
+      fpca_ht <- FPCA(Ly_ht, Lt_ht)
+      fit_ng_ht <- ConvertSupport(fromGrid = fpca_ht$workGrid,
+                                      toGrid = time,
+                                      phi = fpca_ht$phi)
+      f1_t <- fit_ng_ht[,1]
+      f2_t <- fit_ng_ht[,2]
+
+      tryCatch(suppressWarnings(suppressMessages(run_mc_lb(iter, n, tp, cs, eps, f1_t, f2_t))), 
+                 error = function(e) {NA}
+                 )
+    }
+  )
+    names(cond_outputs) <- conditions$cond_name
+    
+    tibble(iter = iter) %>%
+      bind_cols(as_tibble(cond_outputs))
+  },
+  .options = furrr_options(seed = FALSE)
+)
+
+mc_results_lb$n100_tp12_cor0_eps0.25[[1]]
+```
+
+```{r}
+end <- Sys.time()
+end - begin
+```
+
+
+```{r}
+example <- mc_results_lb$n100_tp12_cor0_eps0.25
+metric_names <- names(example$fit_est)
+
+condition_names <- names(mc_results_lb)[-1]
+
+summary_list <- lapply(
+  condition_names,
+  summarize_condition,
+  mc_results = mc_results_lb,
+  metric_names = metric_names
+)
+
+names(summary_list) <- condition_names
+
+summary_df <- as.data.frame(summary_list)
+summary_df <- tibble::rownames_to_column(summary_df, "metric")
+```
+
+```{r eval=FALSE, include=FALSE}
+saveRDS(mc_results_lb, "lb_param_fn_mc_results.R")
+saveRDS(summary_df, "lb_param_fn_dataframe.R")
+```
+
+```{r}
+summary_df1 <- readRDS("np_param_fn_dataframe.R")
+summary_df2 <- readRDS("lb_param_fn_dataframe.R")
+
+plot_simulation_metric2(
+  summary_df1 = summary_df1,
+  summary_df2 = summary_df2,
+  n_mc = n_mc,
+  metric = "cfi",
+  labels = c("FPCA", "Latent Basis"),
+  abline_value = 0.85,
+  main_title = "Monte Carlo Performance: CFI"
+)
 ```
 
 
 # Condition: Non-orthonormal functions
 
-```{r eval=FALSE, include=FALSE}
-# ----- Apply FPCA -----
-Ly_quad_c <- lapply(seq_len(nrow(Y_quad)), function(i) Y_quad[i,] - mean(Y_quad[i,], na.rm = TRUE))
-Lt_quad <- lapply(seq_len(nrow(Y_quad)), function(i) time)
+```{r}
+begin <- Sys.time()
 
-fpca_quad_c <- FPCA(Ly_quad_c, Lt_quad)
-fit_ng_c <- ConvertSupport(fromGrid = fpca_quad_c$workGrid,
-                                      toGrid = time,
-                                      phi = fpca_quad_c$phi)
-plot(fpca_quad_c)
+n_vals   <- c(100, 200, 500)
+tp_vals  <- c(12, 30)
+cor_vals <- c(0, 0.3, 0.8)
+eps_vals <- c(.25, .5, 1)
+
+conditions <- expand_grid(
+  n_subj      = n_vals,
+  time_points = tp_vals,
+  cor_ss      = cor_vals,
+  sig_eps   = eps_vals
+) %>%
+  mutate(
+    cond_name = paste0(
+      "n", n_subj,
+      "_tp", time_points,
+      "_cor", cor_ss,
+      "_eps", sig_eps
+    )
+  )
+
+n_mc <- 100
+
+mc_results_northo <- future_map_dfr(
+  1:n_mc,
+  function(iter){
+    
+    cond_outputs <- map2(
+      seq_len(nrow(conditions)),
+      conditions$cond_name,
+      function(i, cname){
+        
+        n   <- conditions$n_subj[i]
+        tp  <- conditions$time_points[i]
+        cs  <- conditions$cor_ss[i]
+        eps <- conditions$sig_eps[i]
+        
+        time <- seq(0, 1, length.out = tp)
+        
+        f1_t <- time
+        f2_t <- time^2
+        
+        tryCatch(suppressWarnings(suppressMessages(run_mc(iter, n, tp, cs, eps, f1_t, f2_t))), 
+                 error = function(e) {NA}
+                 )
+        }
+    )
+    
+    names(cond_outputs) <- conditions$cond_name
+    
+    tibble(iter = iter) %>%
+      bind_cols(as_tibble(cond_outputs))
+  },
+  .options = furrr_options(seed = FALSE)
+)
+
+mc_results_northo$n100_tp12_cor0_eps0.25[[1]]
+```
+
+```{r}
+end <- Sys.time()
+end - begin
 ```
 
 
 ```{r}
-Y_test <- Y_quad_split$test
-loading1 <- rep(1, n_time)
-loading2 <- fit_ng_c[,1]
+example <- mc_results_northo$n100_tp12_cor0_eps0.25
+metric_names <- names(example$fit_est)
 
-dat_lav <- as.data.frame(Y_test)
-colnames(dat_lav) <- paste0("y", 1:n_time)
-l1 <- paste0(loading1, "*y", 1:n_time, collapse = " + ")
-l2 <- paste0(loading2, "*y", 1:n_time, collapse = " + ")
+condition_names <- names(mc_results_northo)[-1]
 
-growth_mod_c <- paste0("
-  eta1 =~ ", l1, "
-  eta2 =~ ", l2, "
-
-  # latent variances & covariance
-  eta1 ~~ eta1
-  eta2 ~~ eta2
-  eta1 ~~ eta2
-
-  # constant residual variance across time
-  ", paste0(colnames(dat_lav), " ~~ vare*", colnames(dat_lav), collapse = "\n"), "
-")
-
-fit_c <- growth(
-  model = growth_mod_c,
-  data  = dat_lav,
-  missing = "fiml", 
-  em.h1.iter.max = 10000 
+summary_list <- lapply(
+  condition_names,
+  summarize_condition,
+  mc_results = mc_results_northo,
+  metric_names = metric_names
 )
 
-summary(fit_c, standardized = TRUE, fit.measures = TRUE)
+names(summary_list) <- condition_names
+
+summary_df <- as.data.frame(summary_list)
+summary_df <- tibble::rownames_to_column(summary_df, "metric")
 ```
 
 
+```{r eval=FALSE, include=FALSE}
+saveRDS(mc_results_northo, "non_ortho_param_fn_mc_results.R")
+saveRDS(summary_df, "non_ortho_param_fn_dataframe.R")
+```
+
+```{r}
+summary_df <- readRDS("non_ortho_param_fn_dataframe.R")
+summary_df
+```
+
+```{r}
+plot_simulation_metric(
+  summary_df = summary_df,
+  n_mc = n_mc,
+  metric = "cfi",
+  abline_value = 0.95,
+  main_title = "Monte Carlo Performance: CFI"
+)
+```

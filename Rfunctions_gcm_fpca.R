@@ -264,175 +264,151 @@ run_mc <- function(iter, n, time_points, cor_ss, sigma_eps, f1_t, f2_t){
 }
 
 
-run_mcmc_np <- function(iter, n, time_points, cor_ss, f1_t, f2_t){
-
+run_mc_lb <- function(iter, n, time_points, cor_ss, sigma_eps, f1_t, f2_t){
+  
   set.seed(1000 + iter)
-
-  # ----- Setup -----
+  
+  # ----- Parameters -----
   n_subj <- n
   time <- seq(0, 1, length.out = time_points)
   n_time <- length(time)
   missingness <- .3
-
-  beta_s  <- 0
+  
+  # ----- Fixed effects -----
+  beta_s <- 0
   beta_s2 <- 0
-
-  sigma_s  <- 1
+  
+  # ----- Random effects -----
+  sigma_s <- 1
   sigma_s2 <- 1
-  rho_ss2  <- cor_ss
-
-  Sigma <- matrix(
-    c(sigma_s^2,
-      rho_ss2 * sigma_s * sigma_s2,
-      rho_ss2 * sigma_s * sigma_s2,
-      sigma_s2^2),
-    2, 2
-  )
-
-  b_s  <- MASS::mvrnorm(n_subj, mu = c(0, 0), Sigma = Sigma)
+  rho_ss2 <- cor_ss
+  
+  Sigma <- matrix(c(sigma_s^2, rho_ss2 * sigma_s * sigma_s2,
+                    rho_ss2 * sigma_s * sigma_s2, sigma_s2^2), 2, 2)
+  
+  b_s <- MASS::mvrnorm(n_subj, mu = c(0, 0), Sigma = Sigma)
   s_i  <- b_s[,1]
   s2_i <- b_s[,2]
-
-  sigma_eps <- 0.5
-
+  
   # ----- Generate Data -----
   Y <- matrix(NA, nrow = n_subj, ncol = n_time)
   for(i in 1:n_subj){
-    Y[i,] <- (beta_s + s_i[i])  * f1_t +
-             (beta_s2 + s2_i[i]) * f2_t +
-             rnorm(n_time, 0, sigma_eps)
+    Y[i,] <- (beta_s + s_i[i]) * f1_t +
+      (beta_s2 + s2_i[i]) * f2_t +
+      rnorm(n_time, 0, sigma_eps)
   }
-
+  
   Y_miss <- introduce_missingness(Y, missingness)
-  Y_split <- train_test_split(Y_miss)
-
-  Y_train <- Y_split$train
-  Y_test  <- Y_split$test
-
-  # =========================
-  # ----- FPCA GCM ---------
-  # =========================
-
-  Ly <- lapply(seq_len(nrow(Y_train)), function(i) Y_train[i,])
-  Lt <- lapply(seq_len(nrow(Y_train)), function(i) time)
-
-  fpca_fit <- FPCA(Ly, Lt)
-
-  fit_ng <- ConvertSupport(
-    fromGrid = fpca_fit$workGrid,
-    toGrid   = time,
-    phi      = fpca_fit$phi
-  )
-
-  loading1 <- fit_ng[,1]
-  loading2 <- fit_ng[,2]
-
-  dat_lav <- as.data.frame(Y_test)
+  Y_quad_split <- train_test_split(Y_miss)
+  Y_train <- Y_quad_split$train
+  Y_test  <- Y_quad_split$test
+  
+  # LATENT BASIS TRAIN STEP 
+  
+  betas <- paste0("beta", 2:(n_time - 1))
+  loading1 <- rep(1, n_time)
+  loading2 <- c(0, betas, 1)
+  
+  dat_lav <- as.data.frame(Y_train)
   colnames(dat_lav) <- paste0("y", 1:n_time)
-
+  
   l1 <- paste0(loading1, "*y", 1:n_time, collapse = " + ")
   l2 <- paste0(loading2, "*y", 1:n_time, collapse = " + ")
-
-  growth_mod_np <- paste0("
+  
+  growth_mod_train <- paste0("
     eta1 =~ ", l1, "
     eta2 =~ ", l2, "
 
     eta1 ~~ eta1
     eta2 ~~ eta2
     eta1 ~~ eta2
-    
+
+    ", paste0(colnames(dat_lav), " ~~ vare*", colnames(dat_lav), collapse = "\n"), "
+  ")
+  
+  fit_train <- try(
+    growth(model = growth_mod_train,
+           data  = dat_lav,
+           missing = "fiml",
+           em.h1.iter.max = 10000),
+    silent = TRUE
+  )
+  
+  if(inherits(fit_train, "try-error")){
+    return(list(fit_est = rep(NA, 12),
+                phi = cbind(rep(NA,n_time), rep(NA,n_time))))
+  }
+  
+  fit_train_sum <- summary(fit_train, standardized = TRUE)
+  
+  loading2_est <- c(
+    0,
+    fit_train_sum$pe[fit_train_sum$pe$label %in% betas, "est"],
+    1
+  )
+  
+  # TEST STEP (FIX LOADINGS) 
+  
+  dat_lav <- as.data.frame(Y_test)
+  colnames(dat_lav) <- paste0("y", 1:n_time)
+  
+  l1 <- paste0(loading1, "*y", 1:n_time, collapse = " + ")
+  l2 <- paste0(loading2_est, "*y", 1:n_time, collapse = " + ")
+  
+  growth_mod_test <- paste0("
+    eta1 =~ ", l1, "
+    eta2 =~ ", l2, "
+
+    eta1 ~~ var_eta1*eta1
+    eta2 ~~ var_eta2*eta2
+    eta1 ~~ cov_sl*eta2
+
     eta1 ~ mu1*1
     eta2 ~ mu2*1
 
     ", paste0(colnames(dat_lav), " ~~ vare*", colnames(dat_lav), collapse = "\n"), "
   ")
-
-  fit_np <- try(
-    growth(
-      model = growth_mod_np,
-      data  = dat_lav,
-      missing = "fiml",
-      em.h1.iter.max = 10000
-    ),
+  
+  fit_test <- try(
+    growth(model = growth_mod_test,
+           data  = dat_lav,
+           missing = "fiml",
+           em.h1.iter.max = 10000),
     silent = TRUE
   )
-
-  if(inherits(fit_np, "try-error")){
-    return(list(
-      fit_est       = rep(NA, 12),
-      fit_est_param = rep(NA, 12),
-      phi           = cbind(loading1, loading2)
-    ))
+  
+  if(inherits(fit_test, "try-error")){
+    return(list(fit_est = rep(NA, 12),
+                phi = cbind(loading1, loading2_est)))
   }
+  
+  f <- summary(fit_test, standardized = TRUE, fit.measures = TRUE)
+  
+  # Extract parameters
+  pe_vals <- f$pe %>%
+    dplyr::filter(label %in% c("var_eta1","var_eta2","cov_sl","mu1","mu2")) %>%
+    dplyr::pull(est)
+  
+  names(pe_vals) <- c("var_eta1","var_eta2","cov_sl","mu1","mu2")
+  
+  vare_mean <- mean(f$pe[f$pe$label == "vare","est"])
+  names(vare_mean) <- "vare"
+  
+  fit_vals <- f$fit[c("cfi","bic","rmsea","logl","npar","df")]
+  
+  # ISE CALCULATION
 
-  sum_np <- summary(fit_np, standardized = TRUE, fit.measures = TRUE)
-
-  fit_est <- c(
-    var_eta1 = sum_np$pe$est[sum_np$pe$lhs=="eta1" & sum_np$pe$rhs=="eta1"],
-    var_eta2 = sum_np$pe$est[sum_np$pe$lhs=="eta2" & sum_np$pe$rhs=="eta2"],
-    cov_sl   = sum_np$pe$est[sum_np$pe$lhs=="eta1" & sum_np$pe$rhs=="eta2"],
-    mu1      = sum_np$pe$est[sum_np$pe$lhs=="eta1" & sum_np$pe$op=="~" & sum_np$pe$rhs=="1"],
-    mu2      = sum_np$pe$est[sum_np$pe$lhs=="eta2" & sum_np$pe$op=="~" & sum_np$pe$rhs=="1"],
-    vare     = mean(sum_np$pe$est[sum_np$pe$label=="vare"]),
-    sum_np$fit[c("cfi","bic","rmsea","logl","npar","df")]
-  )
-
-  # =========================
-  # ----- Parametric GCM ---
-  # =========================
-
-  loading1_p <- rep(1, n_time)
-  loading2_p <- seq(0, 1, length.out = n_time)
-
-  l1p <- paste0(loading1_p, "*y", 1:n_time, collapse = " + ")
-  l2p <- paste0(loading2_p, "*y", 1:n_time, collapse = " + ")
-
-  growth_mod_param <- paste0("
-    eta1 =~ ", l1p, "
-    eta2 =~ ", l2p, "
-
-    eta1 ~~ eta1
-    eta2 ~~ eta2
-    eta1 ~~ eta2
-    
-    eta1 ~ mu1*1
-    eta2 ~ mu2*1
-
-    ", paste0(colnames(dat_lav), " ~~ vare*", colnames(dat_lav), collapse = "\n"), "
-  ")
-
-  fit_param <- try(
-    growth(
-      model = growth_mod_param,
-      data  = dat_lav,
-      missing = "fiml",
-      em.h1.iter.max = 10000
-    ),
-    silent = TRUE
-  )
-
-  if(inherits(fit_param, "try-error")){
-    fit_est_param <- rep(NA, length(fit_est))
-  } else {
-
-    sum_param <- summary(fit_param, standardized = TRUE, fit.measures = TRUE)
-
-    fit_est_param <- c(
-      var_eta1 = sum_param$pe$est[sum_param$pe$lhs=="eta1" & sum_param$pe$rhs=="eta1"],
-      var_eta2 = sum_param$pe$est[sum_param$pe$lhs=="eta2" & sum_param$pe$rhs=="eta2"],
-      cov_sl   = sum_param$pe$est[sum_param$pe$lhs=="eta1" & sum_param$pe$rhs=="eta2"],
-      mu1      = sum_param$pe$est[sum_param$pe$lhs=="eta1" & sum_param$pe$op=="~" & sum_param$pe$rhs=="1"],
-      mu2      = sum_param$pe$est[sum_param$pe$lhs=="eta2" & sum_param$pe$op=="~" & sum_param$pe$rhs=="1"],
-      vare     = mean(sum_param$pe$est[sum_param$pe$label=="vare"]),
-      sum_param$fit[c("cfi","bic","rmsea","logl","npar","df")]
-    )
-  }
-
-  # ----- Return -----
+  ise <- compare_efunctions_ise(
+    true_phi = cbind(f1_t, f2_t),
+    est_phi  = cbind(loading1, loading2_est),
+    T = time
+  )$ise
+  
+  names(ise) <- c("ise_f1","ise_f2")
+  
   list(
-    fit_est       = fit_est,
-    fit_est_param = fit_est_param,
-    phi           = cbind(loading1, loading2)
+    fit_est = c(pe_vals, vare_mean, fit_vals, ise),
+    phi     = cbind(loading1, loading2_est)
   )
 }
 
@@ -657,6 +633,226 @@ plot_simulation_metric <- function(summary_df,
     theme_minimal(base_size = 13) +
     theme(
       legend.position = "none",
+      strip.text = element_text(face = "bold", size = 12),
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      panel.grid.minor = element_blank()
+    )
+  
+  if (!is.null(abline_value)) {
+    p <- p + geom_hline(yintercept = abline_value,
+                        linetype = "dashed",
+                        size = 1)
+  }
+  
+  return(p)
+}
+
+plot_aligned_efunctions <- function(list_best_cond,
+                                    f1_t,
+                                    f2_t,
+                                    n_mc,
+                                    T_grid = 1:length(f1_t)) {
+  
+  true_phi <- cbind(f1_t, f2_t)
+  
+  all_estimates <- list()
+  counter <- 1
+  
+  for (i in seq(2, 2*n_mc, by = 2)) {
+    
+    est_phi <- list_best_cond[i]$phi
+    
+    match_results <- compare_efunctions_ise(
+      true_phi = true_phi,
+      est_phi  = est_phi,
+      T        = T_grid
+    )
+    
+    aligned_est <- matrix(NA, nrow = length(T_grid), ncol = ncol(true_phi))
+    
+    for (k in 1:nrow(match_results)) {
+      j   <- match_results$best_match_est_phi_column[k]
+      sgn <- match_results$sign[k]
+      aligned_est[, k] <- sgn * est_phi[, j]
+    }
+    
+    all_estimates[[counter]] <- data.frame(
+      T = rep(T_grid, 2),
+      value = c(aligned_est[,1], aligned_est[,2]),
+      efunc = rep(c("f1","f2"), each = length(T_grid)),
+      replication = counter
+    )
+    
+    counter <- counter + 1
+  }
+  
+  df_est <- bind_rows(all_estimates)
+  
+  df_true <- data.frame(
+    T = rep(T_grid, 2),
+    value = c(f1_t, f2_t),
+    efunc = rep(c("f1","f2"), each = length(T_grid))
+  )
+  
+  p <- ggplot() +
+    
+    geom_line(data = df_est,
+              aes(x = T,
+                  y = value,
+                  group = interaction(replication, efunc),
+                  color = efunc),
+              alpha = 0.2,
+              linewidth = 0.6) +
+    
+    geom_line(data = df_true,
+              aes(x = T,
+                  y = value,
+                  color = efunc),
+              linewidth = 1.6) +
+    
+    scale_color_manual(values = c(
+      "f1" = "#0072B2",
+      "f2" = "#D55E00"
+    )) +
+    
+    theme_minimal(base_size = 14) +
+    labs(
+      x = "t",
+      y = expression(phi(t)),
+      title = "Estimated Eigenfunctions Across Replications"
+    ) +
+    theme(
+      legend.title = element_blank(),
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      panel.grid.minor = element_blank()
+    )
+  
+  return(p)
+}
+
+plot_simulation_metric2 <- function(summary_df1,
+                                   summary_df2,
+                                   n_mc,
+                                   metric,
+                                   labels = c("Method 1", "Method 2"),
+                                   abline_value = NULL,
+                                   main_title = NULL) {
+  
+  get_metric_vals <- function(summary_df, cond_name, method_label) {
+    
+    mean_val <- summary_df[
+      summary_df$metric == paste0(metric, "_mean"),
+      cond_name
+    ]
+    
+    sd_val <- summary_df[
+      summary_df$metric == paste0(metric, "_sd"),
+      cond_name
+    ]
+    
+    ci <- 1.96 * as.numeric(sd_val) / sqrt(n_mc)
+    
+    data.frame(
+      condition = cond_name,
+      mean  = as.numeric(mean_val),
+      lower = as.numeric(mean_val) - ci,
+      upper = as.numeric(mean_val) + ci,
+      method = method_label
+    )
+  }
+  
+  ### Define conditions
+  panels <- list(
+    n = list(
+      conds = c(
+        "n100_tp30_cor0_eps0.25",
+        "n200_tp30_cor0_eps0.25",
+        "n500_tp30_cor0_eps0.25"
+      ),
+      x_vals = c(100,200,500),
+      xlab = "Sample Size (n)"
+    ),
+    
+    tp = list(
+      conds = c(
+        "n500_tp12_cor0_eps0.25",
+        "n500_tp30_cor0_eps0.25"
+      ),
+      x_vals = c(12,30),
+      xlab = "Time Points"
+    ),
+    
+    cor = list(
+      conds = c(
+        "n500_tp30_cor0_eps0.25",
+        "n500_tp30_cor0.3_eps0.25",
+        "n500_tp30_cor0.8_eps0.25"
+      ),
+      x_vals = c(0,0.3,0.8),
+      xlab = "RI–S Covariance"
+    ),
+    
+    eps = list(
+      conds = c(
+        "n500_tp30_cor0_eps0.25",
+        "n500_tp30_cor0_eps0.5",
+        "n500_tp30_cor0_eps1"
+      ),
+      x_vals = c(0.25,0.5,1),
+      xlab = "Measurement Error"
+    )
+  )
+  
+  ### Build long dataframe for BOTH summaries
+  plot_df <- bind_rows(lapply(names(panels), function(p) {
+    
+    panel_info <- panels[[p]]
+    
+    df1 <- bind_rows(lapply(panel_info$conds,
+                            function(cond)
+                              get_metric_vals(summary_df1, cond, labels[1])))
+    
+    df2 <- bind_rows(lapply(panel_info$conds,
+                            function(cond)
+                              get_metric_vals(summary_df2, cond, labels[2])))
+    
+    df <- bind_rows(df1, df2)
+    
+    df$x <- rep(panel_info$x_vals, times = 2)
+    df$panel <- panel_info$xlab
+    
+    df
+  }))
+  
+  ### Nice contrasting colors
+  palette_cols <- c("#009E73", "#CC79A7")
+  
+  p <- ggplot(plot_df,
+              aes(x = x,
+                  y = mean,
+                  group = method,
+                  color = method)) +
+    
+    geom_line(size = 1.1) +
+    geom_point(size = 3) +
+    
+    geom_errorbar(aes(ymin = lower, ymax = upper),
+                  width = 0,
+                  size = .8) +
+    
+    facet_wrap(~panel, scales = "free_x", ncol = 2) +
+    
+    scale_color_manual(values = palette_cols) +
+    
+    labs(
+      x = NULL,
+      y = toupper(metric),
+      color = NULL,
+      title = main_title
+    ) +
+    
+    theme_minimal(base_size = 13) +
+    theme(
       strip.text = element_text(face = "bold", size = 12),
       plot.title = element_text(face = "bold", hjust = 0.5),
       panel.grid.minor = element_blank()
