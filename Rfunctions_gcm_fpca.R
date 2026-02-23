@@ -662,6 +662,12 @@ plot_aligned_efunctions <- function(list_best_cond,
     
     est_phi <- list_best_cond[i]$phi
     
+    # check if NULL 
+    if (is.null(est_phi)) {
+      counter <- counter + 1
+      next
+    }
+    
     match_results <- compare_efunctions_ise(
       true_phi = true_phi,
       est_phi  = est_phi,

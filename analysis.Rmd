@@ -452,8 +452,19 @@ summary_df
 plot_simulation_metric(
   summary_df = summary_df,
   n_mc = n_mc,
-  metric = "cfi",
-  abline_value = 0.95,
-  main_title = "Monte Carlo Performance: CFI"
+  metric = "ise_f2",
+  abline_value = 0,
+  main_title = "Monte Carlo Performance: ISE"
 )
+```
+
+```{r}
+tp = 30
+list_best_cond <- mc_results_northo$n500_tp30_cor0_eps0.25
+time <- seq(0, 1, length.out = tp)
+
+f1_t <- time
+f2_t <- time^2
+
+plot_aligned_efunctions(list_best_cond, f1_t, f2_t, n_mc, T_grid = time)
 ```
