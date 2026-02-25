@@ -25,7 +25,7 @@ source("Rfunctions_gcm_fpca.R")
 ```
 
 # Condition: Parametric Functions
-```{r}
+```{r message=FALSE, warning=FALSE}
 begin <- Sys.time()
 
 n_vals   <- c(100, 200, 500)
@@ -48,7 +48,7 @@ conditions <- expand_grid(
     )
   )
 
-n_mc <- 100
+n_mc <- 500
 
 mc_results <- future_map_dfr(
   1:n_mc,
@@ -138,7 +138,7 @@ plot_simulation_metric(
 ```{r message=FALSE, warning=FALSE}
 begin <- Sys.time()
 
-n_mc <- 100
+n_mc <- 500
 
 mc_results_np <- future_map_dfr(
   1:n_mc,
@@ -223,9 +223,9 @@ summary_df
 plot_simulation_metric(
   summary_df = summary_df,
   n_mc = n_mc,
-  metric = "cfi",
-  abline_value = 0.85,
-  main_title = "Monte Carlo Performance: cfi"
+  metric = "rmsea",
+  abline_value = 0.08,
+  main_title = "Monte Carlo Performance: RMSEA"
 )
 ```
 ```{r}

@@ -662,7 +662,7 @@ plot_aligned_efunctions <- function(list_best_cond,
     
     est_phi <- list_best_cond[i]$phi
     
-    # check if NULL 
+    # check if NULL
     if (is.null(est_phi)) {
       counter <- counter + 1
       next
@@ -674,7 +674,9 @@ plot_aligned_efunctions <- function(list_best_cond,
       T        = T_grid
     )
     
-    aligned_est <- matrix(NA, nrow = length(T_grid), ncol = ncol(true_phi))
+    aligned_est <- matrix(NA,
+                          nrow = length(T_grid),
+                          ncol = ncol(true_phi))
     
     for (k in 1:nrow(match_results)) {
       j   <- match_results$best_match_est_phi_column[k]
@@ -692,7 +694,7 @@ plot_aligned_efunctions <- function(list_best_cond,
     counter <- counter + 1
   }
   
-  df_est <- bind_rows(all_estimates)
+  df_est <- dplyr::bind_rows(all_estimates)
   
   df_true <- data.frame(
     T = rep(T_grid, 2),
@@ -700,40 +702,59 @@ plot_aligned_efunctions <- function(list_best_cond,
     efunc = rep(c("f1","f2"), each = length(T_grid))
   )
   
-  p <- ggplot() +
-    
-    geom_line(data = df_est,
+  # ---- Plot f1 ----
+  p_f1 <- ggplot() +
+    geom_line(data = subset(df_est, efunc == "f1"),
               aes(x = T,
                   y = value,
-                  group = interaction(replication, efunc),
-                  color = efunc),
+                  group = replication),
               alpha = 0.2,
-              linewidth = 0.6) +
+              linewidth = 0.6,
+              color = "#0072B2") +
     
-    geom_line(data = df_true,
-              aes(x = T,
-                  y = value,
-                  color = efunc),
-              linewidth = 1.6) +
-    
-    scale_color_manual(values = c(
-      "f1" = "#0072B2",
-      "f2" = "#D55E00"
-    )) +
+    geom_line(data = subset(df_true, efunc == "f1"),
+              aes(x = T, y = value),
+              linewidth = 1.6,
+              color = "#0072B2") +
     
     theme_minimal(base_size = 14) +
     labs(
       x = "t",
-      y = expression(phi(t)),
-      title = "Estimated Eigenfunctions Across Replications"
+      y = expression(phi[1](t)),
+      title = "Eigenfunction 1 Across Replications"
     ) +
     theme(
-      legend.title = element_blank(),
       plot.title = element_text(face = "bold", hjust = 0.5),
       panel.grid.minor = element_blank()
     )
   
-  return(p)
+  # ---- Plot f2 ----
+  p_f2 <- ggplot() +
+    geom_line(data = subset(df_est, efunc == "f2"),
+              aes(x = T,
+                  y = value,
+                  group = replication),
+              alpha = 0.2,
+              linewidth = 0.6,
+              color = "#D55E00") +
+    
+    geom_line(data = subset(df_true, efunc == "f2"),
+              aes(x = T, y = value),
+              linewidth = 1.6,
+              color = "#D55E00") +
+    
+    theme_minimal(base_size = 14) +
+    labs(
+      x = "t",
+      y = expression(phi[2](t)),
+      title = "Eigenfunction 2 Across Replications"
+    ) +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      panel.grid.minor = element_blank()
+    )
+  
+  return(list(p_f1 = p_f1, p_f2 = p_f2))
 }
 
 plot_simulation_metric2 <- function(summary_df1,
