@@ -257,7 +257,7 @@ plot_aligned_efunctions(list_best_cond, f1_t, f2_t, n_mc, T_grid = time)
 ```{r message=FALSE, warning=FALSE}
 begin <- Sys.time()
 
-n_mc <- 100
+n_mc <- 500
 
 mc_results_lb <- future_map_dfr(
   1:n_mc,
@@ -341,10 +341,10 @@ plot_simulation_metric2(
   summary_df1 = summary_df1,
   summary_df2 = summary_df2,
   n_mc = n_mc,
-  metric = "cfi",
+  metric = "rmsea",
   labels = c("FPCA", "Latent Basis"),
-  abline_value = 0.85,
-  main_title = "Monte Carlo Performance: CFI"
+  abline_value = 0.08,
+  main_title = "Monte Carlo Performance: RMSEA"
 )
 ```
 
