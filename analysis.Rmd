@@ -341,10 +341,10 @@ plot_simulation_metric2(
   summary_df1 = summary_df1,
   summary_df2 = summary_df2,
   n_mc = n_mc,
-  metric = "rmsea",
+  metric = "bic",
   labels = c("FPCA", "Latent Basis"),
-  abline_value = 0.08,
-  main_title = "Monte Carlo Performance: RMSEA"
+  abline_value = NULL,
+  main_title = "Monte Carlo Performance: BIC"
 )
 ```
 

@@ -16,6 +16,59 @@ ui <- fluidPage(
   
   titlePanel("Covariance Topology Explorer"),
   
+  withMathJax(),
+  
+  tags$div(
+    style = "margin-bottom:20px; font-size:14px; line-height:1.5;",
+    
+    tags$h4("Welcome!"),
+    
+    tags$p("This app provides an interactive demonstration of how latent 
+    functional structure generates covariance surfaces (covariance matrices 
+    visualized over continuous time). The covariance surface serves as a 
+    bridge between parametric longitudinal modeling approaches, such as 
+    Structural Equation Models (SEM) and Multilevel Models (MLM), and the 
+    nonparametric framework of Functional Principal Component Analysis (FPCA).
+    
+    In growth curve settings, the time-dependent loadings in SEM and the 
+    functional forms specified in MLM both describe systematic temporal change 
+    processes. FPCA recovers this structure directly from the data. Its 
+    eigenfunctions provide nonparametric approximations to the underlying
+    functions of time that drive between-subject variability. Indeed, the 
+    loadings in SEM and functional forms of the MLM are both nonparametrically 
+    obtained from the functional principal components.
+    
+    By exploring how changes in the generating function and variance components 
+    alter the covariance surface and its eigenfunctions, one can see how these 
+    seemingly distinct analytical approaches are unified through the covariance. 
+    This perspective highlights how parametric and nonparametric methods converge 
+    in the analysis of longitudinal data pushing us further towards realizing 
+    Nesselroade's aim of fully understanding both the 'warp and woof of the 
+    developmental fabric'."),
+    
+    tags$h4("Method"),
+    
+    tags$p("Data are generated from the multilevel model:"),
+    
+    helpText("$$ y_i(t) = \\alpha_i f(t) + e_i(t) $$"),
+    
+    tags$p("where "),
+    
+    tags$ul(
+      tags$li("f(t) is a user-defined function on the interval [0,1],"),
+      tags$li("\\( \\alpha_i = \\beta + b_i \\) is a subject-specific coefficient,"),
+      tags$li("\\( b_i \\sim N(0, \\sigma_b^2) \\) represents between-subject variability,"),
+      tags$li("\\( e_i(t) \\sim N(0, \\sigma_\\varepsilon^2) \\) represents measurement noise.")
+    ),
+    
+    tags$h4("Instructions"),
+    
+    tags$p("Feel free to visualize the empirical covariance surface and 
+            examine how functional principal component analysis (FPCA)
+           recovers the underlying generating function. Be creative, and most importantly,..."),
+    tags$h5("Have Fun!")
+  ),
+  
   sidebarLayout(
     
     sidebarPanel(
@@ -33,7 +86,7 @@ ui <- fluidPage(
                   min = 5, max = 500, value = 100, step = 5),
       
       numericInput("beta", "β", value = 1),
-      numericInput("sigma_eps", "Noise SD", value = 0.5, min = 0),
+      numericInput("sigma_eps", HTML("Noise SD (σ<sub>ε</sub>)"), value = 0.5, min = 0),
       
       textInput(
         "f_t",
@@ -41,7 +94,7 @@ ui <- fluidPage(
         value = "time"
       ),
       
-      checkboxInput("Orthonormalize", "Orthonormalize", FALSE), 
+      checkboxInput("Orthonormalize", "Orthonormalize", TRUE), 
       
       tags$details(
         tags$summary("Random effects"),
@@ -53,22 +106,20 @@ ui <- fluidPage(
     
     mainPanel(
       tabsetPanel(
-    
+        
         tabPanel(
           "Covariance Surface",
           plotlyOutput("cov_plot", height = "600px")
         ),
-    
+        
         tabPanel(
           "FPCA Eigenfunction",
           checkboxInput("compute_fpca", "Compute FPCA", value = FALSE),
           plotlyOutput("eig_plot", height = "600px")
         )
-    
+        
       )
     )
-
-    
   )
 )
 
