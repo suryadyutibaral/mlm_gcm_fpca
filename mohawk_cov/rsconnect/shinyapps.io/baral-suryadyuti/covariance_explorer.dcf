@@ -1,0 +1,12 @@
+name: covariance_explorer
+title: covariance_explorer
+username: baral-suryadyuti
+account: baral-suryadyuti
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 16775886
+bundleId: 11636318
+url: https://baral-suryadyuti.shinyapps.io/covariance_explorer/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE

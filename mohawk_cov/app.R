@@ -28,17 +28,17 @@ ui <- fluidPage(
     visualized over continuous time). The covariance surface serves as a 
     bridge between parametric longitudinal modeling approaches, such as 
     Structural Equation Models (SEM) and Multilevel Models (MLM), and the 
-    nonparametric framework of Functional Principal Component Analysis (FPCA).
+    nonparametric framework of Functional Principal Component Analysis (FPCA)."),
     
-    In growth curve settings, the time-dependent loadings in SEM and the 
+    tags$p("In growth curve settings, the time-dependent loadings in SEM and the 
     functional forms specified in MLM both describe systematic temporal change 
     processes. FPCA recovers this structure directly from the data. Its 
     eigenfunctions provide nonparametric approximations to the underlying
     functions of time that drive between-subject variability. Indeed, the 
     loadings in SEM and functional forms of the MLM are both nonparametrically 
-    obtained from the functional principal components.
+    obtained from the functional principal components."),
     
-    By exploring how changes in the generating function and variance components 
+    tags$p("By exploring how changes in the generating function and variance components 
     alter the covariance surface and its eigenfunctions, one can see how these 
     seemingly distinct analytical approaches are unified through the covariance. 
     This perspective highlights how parametric and nonparametric methods converge 
@@ -63,9 +63,29 @@ ui <- fluidPage(
     
     tags$h4("Instructions"),
     
-    tags$p("Feel free to visualize the empirical covariance surface and 
-            examine how functional principal component analysis (FPCA)
-           recovers the underlying generating function. Be creative, and most importantly,..."),
+    tags$p("We have options to vary number of subjects and time points. As you know from Stats 101, more 
+    people and time points lead to better estimation of the covariance matrix. That is true here too. However,
+    the maximum possible values here are set to reasonable values to ensure the app does not crash. Further, 
+    when computing FPCA please set smaller values for time points to enable faster computation."),
+    
+    tags$p("There are buttons for each element of the data generating model. Feel free to make changes and explore on 
+    your own. I would encourage you to change f(t) and measurement error variance and see how that affects the 
+    estimation of f(t). Here is an fun activity. Plot the covariance surface with Noise SD = .5, and then plot 
+    the same with Noie SD = 1. Can you explain why this happens?"),
+    
+    tags$p("When changing the f(t), please use 'time' and not 't'. For example, if you want f(t) = 
+    sin(t), you should write sin(time) in the 'f(time) =' box. Most of the functions you use will probably not be 
+    normalized, so we normalize them for you. This is particularly important when you compare the
+    estimated functions to the generating functions. Remember, FPCA returns only orthonormal functions."),
+    
+    tags$p("The app was coded to be used in a laptop or a desktop. You can use it on your mobile, but note that the covariance 
+    surface may be difficult to 'explore.' The FPCA computation should work out better. You might want to hold you mobile
+    in landscape mode for a better experience."),
+    
+    
+    tags$p("Feel free to visualize the empirical covariance surface and examine how functional principal component analysis (FPCA)
+    recovers the underlying generating function. Last bit of advice"),
+    tags$h5("Be creative, and most importantly,..."),
     tags$h5("Have Fun!")
   ),
   
@@ -80,10 +100,10 @@ ui <- fluidPage(
       "),
       
       sliderInput("n_subj", "Subjects",
-                  min = 50, max = 2000, value = 1000, step = 50),
+                  min = 50, max = 1000, value = 1000, step = 50),
       
       sliderInput("n_time", "Time points",
-                  min = 5, max = 500, value = 100, step = 5),
+                  min = 5, max = 300, value = 100, step = 5),
       
       numericInput("beta", "β", value = 1),
       numericInput("sigma_eps", HTML("Noise SD (σ<sub>ε</sub>)"), value = 0.5, min = 0),
@@ -94,7 +114,7 @@ ui <- fluidPage(
         value = "time"
       ),
       
-      checkboxInput("Orthonormalize", "Orthonormalize", TRUE), 
+      checkboxInput("Orthonormalize", "Normalize", TRUE), 
       
       tags$details(
         tags$summary("Random effects"),
