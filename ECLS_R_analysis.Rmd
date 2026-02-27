@@ -1,0 +1,175 @@
+---
+title: "ECLS_K_analysis"
+author: "Suryadyuti Baral"
+date: '`r Sys.Date()`'
+output: pdf_document
+---
+
+```{r}
+library(fda)
+library(fdapace)
+library(ggplot2)
+library(lavaan)
+library(tidyr)
+library(tidyverse)
+library(dplyr)
+library(lme4)
+library(MASS)
+source("Rfunctions_gcm_fpca.R")
+
+load("C://Users//sonnet//Downloads//edudat//ECLSK_98_99_K8_CHILD_v1_0.rdata")
+ecls <- ECLSK_98_99_K8_CHILD_v1_0
+```
+
+```{r eval=FALSE, include=FALSE}
+library(dplyr)
+library(lubridate)
+library(haven)
+
+ecls_dates <- ecls %>%
+  mutate(
+    across(
+      matches("C[1-7]ASMT(YY|MM|DD)"),
+      ~ as.integer(zap_labels(.))
+    ),
+    R7AGE = as.numeric(zap_labels(R7AGE))
+  )
+
+ecls_dates <- ecls_dates %>%
+  mutate(
+    C1_date = make_date(C1ASMTYY, C1ASMTMM, C1ASMTDD),
+    C2_date = make_date(C2ASMTYY, C2ASMTMM, C2ASMTDD),
+    C3_date = make_date(C3ASMTYY, C3ASMTMM, C3ASMTDD),
+    C4_date = make_date(C4ASMTYY, C4ASMTMM, C4ASMTDD),
+    C5_date = make_date(C5ASMTYY, C5ASMTMM, C5ASMTDD),
+    C6_date = make_date(C6ASMTYY, C6ASMTMM, C6ASMTDD),
+    C7_date = make_date(C7ASMTYY, C7ASMTMM, C7ASMTDD)
+  )
+
+ecls_dates <- ecls_dates %>%
+  mutate(
+    C1AGE = R7AGE,
+    C2AGE = R7AGE + as.numeric(difftime(C2_date, C1_date, units = "days")) / 365.25,
+    C3AGE = R7AGE + as.numeric(difftime(C3_date, C1_date, units = "days")) / 365.25,
+    C4AGE = R7AGE + as.numeric(difftime(C4_date, C1_date, units = "days")) / 365.25,
+    C5AGE = R7AGE + as.numeric(difftime(C5_date, C1_date, units = "days")) / 365.25,
+    C6AGE = R7AGE + as.numeric(difftime(C6_date, C1_date, units = "days")) / 365.25,
+    C7AGE = R7AGE + as.numeric(difftime(C7_date, C1_date, units = "days")) / 365.25
+  )
+
+ecls_r <- ecls_dates %>%
+  select(
+    CHILDID,
+    C1R4RSCL, C2R4RSCL, C3R4RSCL, C4R4RSCL,
+    C5R4RSCL, C6R4RSCL, C7R4RSCL,
+    C1AGE, C2AGE, C3AGE, C4AGE,
+    C5AGE, C6AGE, C7AGE
+  ) %>%
+  filter(rowSums(!is.na(across(starts_with("C") & !contains("AGE")))) > 0)
+```
+
+
+```{r}
+ecls_r <- ecls %>%
+  select(CHILDID, C1R4RSCL, C2R4RSCL, C3R4RSCL, C4R4RSCL, C5R4RSCL, C6R4RSCL, C7R4RSCL) %>%
+  filter(rowSums(!is.na(across(-CHILDID))) > 0)
+```
+
+
+```{r}
+time <- 1:7
+Y <- as.matrix(ecls_r[,-1])
+
+set.seed(123)
+Y_split <- train_test_split(Y) 
+Y_train <- Y_split$train
+```
+
+```{r}
+set.seed(123)
+n_sample <- 100
+sample_ids <- sample(1:nrow(Y_train), n_sample)
+
+# Convert to data frame for ggplot
+df_plot <- data.frame(
+  id = rep(sample_ids, each = length(time)),
+  time = rep(time, times = n_sample),
+  y = as.vector(t(Y_train[sample_ids, ]))
+)
+
+df_plot_clean <- df_plot |>
+  dplyr::filter(
+    !is.na(time),
+    !is.na(y)
+  )
+
+# Plot
+ggplot(
+  df_plot_clean,
+  aes(x = time, y = y, color = factor(id), group = id)
+) +
+  geom_line(alpha = 0.6, linewidth = 0.6) +
+  geom_point(size = 2) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = paste("Random Sample of", n_sample, "Subjects with Reading Scores"),
+    x = "Time",
+    y = "Y(t)",
+    color = "Subject ID"
+  ) +
+  theme(legend.position = "none")
+```
+```{r}
+Ly_train <- lapply(seq_len(nrow(Y_train)), function(i) Y_train[i,])
+Lt_train <- lapply(seq_len(nrow(Y_train)), function(i) time)
+
+fpca_train <- FPCA(Ly_train, Lt_train, optns = list(methodMuCovEst = "smooth"))
+fit_ng <- ConvertSupport(fromGrid = fpca_train$workGrid,
+                                      toGrid = time,
+                                      phi = fpca_train$phi)
+
+fit_mu_ng <- ConvertSupport(fromGrid = fpca_train$workGrid,
+                                      toGrid = time,
+                                      mu = fpca_train$mu)
+
+plot(fpca_train)
+```
+```{r}
+Y_test <- Y_split$test
+loading1 <- fit_ng[,1]
+loading2 <- fit_ng[,2]
+mu_fpca  <- fit_mu_ng
+
+dat_lav <- as.data.frame(Y_test)
+colnames(dat_lav) <- paste0("y", time)
+l1 <- paste0(loading1, "*y", time, collapse = " + ")
+l2 <- paste0(loading2, "*y", time, collapse = " + ")
+mu_l <- paste0(mu_fpca, "*y", time, collapse = " + ")
+
+growth_mod <- paste0("
+  eta1 =~ ", l1, "
+  eta2 =~ ", l2, "
+  mu_l =~ ", mu_l,"
+
+  # latent variances & covariance
+  eta1 ~~ eta1
+  eta2 ~~ eta2
+  eta1 ~~ eta2
+  
+  mu_l ~ 1      # fix mean to 1
+
+  # constant residual variance across time
+  ", paste0(colnames(dat_lav), " ~~ vare*", colnames(dat_lav), collapse = "\n"), "
+")
+
+fit <- growth(
+  model = growth_mod,
+  data  = dat_lav,
+  missing = "fiml", 
+  meanstructure = FALSE,
+  em.h1.iter.max = 10000 
+)
+
+summary(fit, standardized = TRUE, fit.measures = TRUE)
+```
+

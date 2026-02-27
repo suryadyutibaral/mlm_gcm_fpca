@@ -351,7 +351,7 @@ plot_simulation_metric2(
 
 # Condition: Non-orthonormal functions
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 begin <- Sys.time()
 
 n_vals   <- c(100, 200, 500)
@@ -374,7 +374,7 @@ conditions <- expand_grid(
     )
   )
 
-n_mc <- 100
+n_mc <- 500
 
 mc_results_northo <- future_map_dfr(
   1:n_mc,
@@ -406,7 +406,7 @@ mc_results_northo <- future_map_dfr(
     tibble(iter = iter) %>%
       bind_cols(as_tibble(cond_outputs))
   },
-  .options = furrr_options(seed = FALSE)
+  .options = furrr_options(seed = NULL)
 )
 
 mc_results_northo$n100_tp12_cor0_eps0.25[[1]]
