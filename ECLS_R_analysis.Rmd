@@ -21,54 +21,6 @@ load("C://Users//sonnet//Downloads//edudat//ECLSK_98_99_K8_CHILD_v1_0.rdata")
 ecls <- ECLSK_98_99_K8_CHILD_v1_0
 ```
 
-```{r eval=FALSE, include=FALSE}
-library(dplyr)
-library(lubridate)
-library(haven)
-
-ecls_dates <- ecls %>%
-  mutate(
-    across(
-      matches("C[1-7]ASMT(YY|MM|DD)"),
-      ~ as.integer(zap_labels(.))
-    ),
-    R7AGE = as.numeric(zap_labels(R7AGE))
-  )
-
-ecls_dates <- ecls_dates %>%
-  mutate(
-    C1_date = make_date(C1ASMTYY, C1ASMTMM, C1ASMTDD),
-    C2_date = make_date(C2ASMTYY, C2ASMTMM, C2ASMTDD),
-    C3_date = make_date(C3ASMTYY, C3ASMTMM, C3ASMTDD),
-    C4_date = make_date(C4ASMTYY, C4ASMTMM, C4ASMTDD),
-    C5_date = make_date(C5ASMTYY, C5ASMTMM, C5ASMTDD),
-    C6_date = make_date(C6ASMTYY, C6ASMTMM, C6ASMTDD),
-    C7_date = make_date(C7ASMTYY, C7ASMTMM, C7ASMTDD)
-  )
-
-ecls_dates <- ecls_dates %>%
-  mutate(
-    C1AGE = R7AGE,
-    C2AGE = R7AGE + as.numeric(difftime(C2_date, C1_date, units = "days")) / 365.25,
-    C3AGE = R7AGE + as.numeric(difftime(C3_date, C1_date, units = "days")) / 365.25,
-    C4AGE = R7AGE + as.numeric(difftime(C4_date, C1_date, units = "days")) / 365.25,
-    C5AGE = R7AGE + as.numeric(difftime(C5_date, C1_date, units = "days")) / 365.25,
-    C6AGE = R7AGE + as.numeric(difftime(C6_date, C1_date, units = "days")) / 365.25,
-    C7AGE = R7AGE + as.numeric(difftime(C7_date, C1_date, units = "days")) / 365.25
-  )
-
-ecls_r <- ecls_dates %>%
-  select(
-    CHILDID,
-    C1R4RSCL, C2R4RSCL, C3R4RSCL, C4R4RSCL,
-    C5R4RSCL, C6R4RSCL, C7R4RSCL,
-    C1AGE, C2AGE, C3AGE, C4AGE,
-    C5AGE, C6AGE, C7AGE
-  ) %>%
-  filter(rowSums(!is.na(across(starts_with("C") & !contains("AGE")))) > 0)
-```
-
-
 ```{r}
 ecls_r <- ecls %>%
   select(CHILDID, C1R4RSCL, C2R4RSCL, C3R4RSCL, C4R4RSCL, C5R4RSCL, C6R4RSCL, C7R4RSCL) %>%
@@ -156,7 +108,7 @@ growth_mod <- paste0("
   eta2 ~~ eta2
   eta1 ~~ eta2
   
-  mu_l ~ 1      # fix mean to 1
+  mu_l ~ 1*1      # fix mean to 1
 
   # constant residual variance across time
   ", paste0(colnames(dat_lav), " ~~ vare*", colnames(dat_lav), collapse = "\n"), "
@@ -171,5 +123,180 @@ fit <- growth(
 )
 
 summary(fit, standardized = TRUE, fit.measures = TRUE)
+```
+```{r}
+library(dplyr)
+library(lubridate)
+library(haven)
+
+ecls_dates <- ecls %>%
+  mutate(
+    # Convert all labelled date variables to integers
+    across(
+      matches("C[1-7]ASMT(YY|MM|DD)|R7DOB(YY|MM|DD)"),
+      ~ as.integer(zap_labels(.))
+    ),
+
+    # Construct Date of Birth
+    DOB = make_date(DOBYY, DOBMM, DOBDD),
+
+    # Construct assessment dates
+    C1_date = make_date(C1ASMTYY, C1ASMTMM, C1ASMTDD),
+    C2_date = make_date(C2ASMTYY, C2ASMTMM, C2ASMTDD),
+    C3_date = make_date(C3ASMTYY, C3ASMTMM, C3ASMTDD),
+    C4_date = make_date(C4ASMTYY, C4ASMTMM, C4ASMTDD),
+    C5_date = make_date(C5ASMTYY, C5ASMTMM, C5ASMTDD),
+    C6_date = make_date(C6ASMTYY, C6ASMTMM, C6ASMTDD),
+    C7_date = make_date(C7ASMTYY, C7ASMTMM, C7ASMTDD)
+  ) %>%
+  mutate(
+    # Age in YEARS with full decimal precision
+    C1AGE = as.numeric(difftime(C1_date, DOB, units = "days")) / 365.25,
+    C2AGE = as.numeric(difftime(C2_date, DOB, units = "days")) / 365.25,
+    C3AGE = as.numeric(difftime(C3_date, DOB, units = "days")) / 365.25,
+    C4AGE = as.numeric(difftime(C4_date, DOB, units = "days")) / 365.25,
+    C5AGE = as.numeric(difftime(C5_date, DOB, units = "days")) / 365.25,
+    C6AGE = as.numeric(difftime(C6_date, DOB, units = "days")) / 365.25,
+    C7AGE = as.numeric(difftime(C7_date, DOB, units = "days")) / 365.25
+  )
+
+ecls_r <- ecls_dates %>%
+  select(
+    CHILDID,
+    C1R4RSCL, C2R4RSCL, C3R4RSCL, C4R4RSCL,
+    C5R4RSCL, C6R4RSCL, C7R4RSCL,
+    C1AGE, C2AGE, C3AGE, C4AGE,
+    C5AGE, C6AGE, C7AGE
+  ) %>%
+  filter(rowSums(!is.na(across(starts_with("C") & !contains("AGE")))) > 0)
+```
+
+```{r}
+ecls_long <- ecls_r %>%
+  mutate(id = row_number()) %>%
+  pivot_longer(
+    cols = starts_with("C"),
+    names_to = c("wave", ".value"),
+    names_pattern = "C(\\d)(R4RSCL|AGE)"
+  ) %>%
+  rename(
+    score = R4RSCL,
+    age   = AGE
+  ) %>%
+  filter(!is.na(score), !is.na(age))
+
+set.seed(123)
+
+sample_ids <- sample(unique(ecls_long$id), 100)
+
+df_plot_clean <- ecls_long %>%
+  filter(id %in% sample_ids)
+
+ggplot(
+  df_plot_clean,
+  aes(x = age, y = score, group = id)
+) +
+  geom_line(alpha = 0.6, linewidth = 0.6) +
+  geom_point(size = 2) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Random Sample of 100 Subjects with Reading Scores",
+    x = "Age (years)",
+    y = "Reading Score"
+  ) +
+  theme(legend.position = "none")
+```
+
+```{r}
+Y <- ecls_r %>%
+  select(C1R4RSCL, C2R4RSCL, C3R4RSCL, C4R4RSCL, C5R4RSCL, C6R4RSCL, C7R4RSCL) %>%
+  as.matrix()
+Y_age <- ecls_r %>%
+  select(C1AGE, C2AGE, C3AGE, C4AGE, C5AGE, C6AGE, C7AGE) %>%
+  as.matrix()
+
+set.seed(123)
+Y_split <- train_test_split(Y)
+Y_train <- Y_split$train
+Y_train_age <- Y_age[Y_split$train_idx,]
+```
+
+```{r}
+n <- nrow(Y_train)
+
+Ly_train <- vector("list", n)
+Lt_train <- vector("list", n)
+
+for (i in 1:n) {
+  
+  yi  <- Y_train[i, ]
+  ti  <- round(Y_train_age[i, ], 2)
+  
+  keep <- !is.na(yi) & !is.na(ti)
+  
+  Ly_train[[i]] <- yi[keep]
+  Lt_train[[i]] <- ti[keep]
+}
+
+fpca_train <- FPCA(Ly_train, Lt_train)
+
+time <- seq(4.5, 15, by = .1)
+fit_ng <- ConvertSupport(fromGrid = fpca_train$workGrid, toGrid = time, phi = fpca_train$phi)
+
+fit_mu_ng <- ConvertSupport(fromGrid = fpca_train$workGrid, toGrid = time, mu = fpca_train$mu)
+```
+
+
+```{r}
+plot(fpca_train)
+FPC_dat <- fpca_train$xiEst
+colnames(FPC_dat) <- c("FPC1", "FPC2", "FPC3")
+plot(FPC2~FPC1, FPC_dat)
+```
+
+```{r}
+ecls_test <- ecls_long %>%
+  filter(id %in% Y_split$test_idx) %>%
+  mutate(
+    age = round(ifelse(age <= 4.5 | age >= 15, NA_real_, age), 1)
+  )
+
+n <- length(unique(ecls_test$id))
+
+dat_long <- expand.grid(
+  id  = unique(ecls_test$id),
+  age = time
+)
+
+dat_long <- dat_long %>%
+  left_join(
+    ecls_test %>% select(id, age, score),
+    by = c("id", "age")
+  ) 
+```
+
+```{r}
+dat_long$f1 <- rep(fit_ng[,1], n)
+dat_long$f2 <- rep(fit_ng[,2], n)
+dat_long$f3 <- rep(fit_ng[,3], n)
+dat_long$mu <- rep(fit_mu_ng, n)
+
+dat_long$y <- dat_long$score - dat_long$mu
+
+fit_lmer2 <- lmer(
+  y ~ f1 + f2 + (f1 + f2 | id),
+  data = dat_long,
+  REML = TRUE
+)
+
+fit_lmer1 <- lmer(
+  y ~ f1 + (f1 | id),
+  data = dat_long,
+  REML = TRUE
+)
+
+anova(fit_lmer1, fit_lmer2)
+summary(fit_lmer2)
+
 ```
 

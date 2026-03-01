@@ -409,7 +409,7 @@ mc_results_northo <- future_map_dfr(
   .options = furrr_options(seed = NULL)
 )
 
-mc_results_northo$n100_tp12_cor0_eps0.25[[1]]
+mc_results_northo$n100_tp12_cor0_eps0.25[[10]]
 ```
 
 ```{r}
@@ -452,9 +452,9 @@ summary_df
 plot_simulation_metric(
   summary_df = summary_df,
   n_mc = n_mc,
-  metric = "ise_f2",
-  abline_value = 0,
-  main_title = "Monte Carlo Performance: ISE"
+  metric = "rmsea",
+  abline_value = 0.08,
+  main_title = "Monte Carlo Performance: RMSEA"
 )
 ```
 
