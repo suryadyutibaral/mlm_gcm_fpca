@@ -85,7 +85,64 @@ fit_mu_ng <- ConvertSupport(fromGrid = fpca_train$workGrid,
                                       mu = fpca_train$mu)
 
 plot(fpca_train)
+FPC_dat <- fpca_train$xiEst
+colnames(FPC_dat) <- c("FPC1", "FPC2")
+plot(FPC2~FPC1, FPC_dat)
 ```
+```{r}
+age_grid <- fpca_train$workGrid
+
+# ---- Component 1 ----
+xi2_0 <- which(fpca_train$xiEst[,2] < .1 & fpca_train$xiEst[,2] > -.1)
+
+phi1_df <- data.frame(
+  age = age_grid,
+  High  = fpca_train$mu + fpca_train$phi[,1] * max(fpca_train$xiEst[xi2_0,1]),
+  Mean  = fpca_train$mu,
+  Low   = fpca_train$mu + fpca_train$phi[,1] * min(fpca_train$xiEst[xi2_0,1])
+) %>%
+  pivot_longer(-age, names_to = "Curve", values_to = "value") %>%
+  mutate(Component = "FPC 1")
+
+# ---- Component 2 ----
+xi1_0 <- which(fpca_train$xiEst[,1] < .1 & fpca_train$xiEst[,1] > -.1)
+
+phi2_df <- data.frame(
+  age = age_grid,
+  High  = fpca_train$mu + fpca_train$phi[,2] * max(fpca_train$xiEst[xi1_0,2]),
+  Mean  = fpca_train$mu,
+  Low   = fpca_train$mu + fpca_train$phi[,2] * min(fpca_train$xiEst[xi1_0,2])
+) %>%
+  pivot_longer(-age, names_to = "Curve", values_to = "value") %>%
+  mutate(Component = "FPC 2")
+
+plot_df <- bind_rows(phi1_df, phi2_df)
+
+ggplot(plot_df, aes(x = age, y = value, color = Curve)) +
+  geom_line(linewidth = 1) +
+  facet_wrap(~ Component, ncol = 2) +
+  scale_color_manual(
+    values = c(
+      "High" = "purple",
+      "Mean" = "black",
+      "Low"  = "pink"
+    )
+  ) +
+  theme_minimal(base_size = 15) +
+  labs(
+    title = "Functional Principal Component Effects \n on Reading Trajectories",
+    x = "Waves (1-7)",
+    y = "Reading Score",
+    color = "Curve",
+    linetype = "Curve"
+  ) +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold", size = 14)
+  )
+```
+
+
 ```{r}
 Y_test <- Y_split$test
 loading1 <- fit_ng[,1]
@@ -298,5 +355,58 @@ fit_lmer1 <- lmer(
 anova(fit_lmer1, fit_lmer2)
 summary(fit_lmer2)
 
+```
+
+```{r}
+age_grid <- fpca_train$workGrid
+
+# ---- Component 1 ----
+xi2_0 <- which(fpca_train$xiEst[,2] < .1 & fpca_train$xiEst[,2] > -.1)
+
+phi1_df <- data.frame(
+  age = age_grid,
+  High  = fpca_train$mu + fpca_train$phi[,1] * max(fpca_train$xiEst[xi2_0,1]),
+  Mean  = fpca_train$mu,
+  Low   = fpca_train$mu + fpca_train$phi[,1] * min(fpca_train$xiEst[xi2_0,1])
+) %>%
+  pivot_longer(-age, names_to = "Curve", values_to = "value") %>%
+  mutate(Component = "FPC 1")
+
+# ---- Component 2 ----
+xi1_0 <- which(fpca_train$xiEst[,1] < .1 & fpca_train$xiEst[,1] > -.1)
+
+phi2_df <- data.frame(
+  age = age_grid,
+  High  = fpca_train$mu + fpca_train$phi[,2] * max(fpca_train$xiEst[xi1_0,2]),
+  Mean  = fpca_train$mu,
+  Low   = fpca_train$mu + fpca_train$phi[,2] * min(fpca_train$xiEst[xi1_0,2])
+) %>%
+  pivot_longer(-age, names_to = "Curve", values_to = "value") %>%
+  mutate(Component = "FPC 2")
+
+plot_df <- bind_rows(phi1_df, phi2_df)
+
+ggplot(plot_df, aes(x = age, y = value, color = Curve)) +
+  geom_line(linewidth = 1) +
+  facet_wrap(~ Component, ncol = 2) +
+  scale_color_manual(
+    values = c(
+      "High" = "purple",
+      "Mean" = "black",
+      "Low"  = "pink"
+    )
+  ) +
+  theme_minimal(base_size = 15) +
+  labs(
+    title = "Functional Principal Component Effects \n on Reading Trajectories",
+    x = "Age (years)",
+    y = "Reading Score",
+    color = "Curve",
+    linetype = "Curve"
+  ) +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold", size = 14)
+  )
 ```
 
