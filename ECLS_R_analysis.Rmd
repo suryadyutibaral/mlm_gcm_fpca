@@ -251,15 +251,16 @@ df_plot_clean <- ecls_long %>%
 
 ggplot(
   df_plot_clean,
-  aes(x = age, y = score, group = id)
+  aes(x = age, y = score, color = factor(id), group = id)
 ) +
   geom_line(alpha = 0.6, linewidth = 0.6) +
   geom_point(size = 2) +
   theme_minimal(base_size = 14) +
   labs(
-    title = "Random Sample of 100 Subjects with Reading Scores",
+    title = paste("Random Sample of 100 Subjects with Reading Scores"),
     x = "Age (years)",
-    y = "Reading Score"
+    y = "Reading Score",
+    color = "Subject ID"
   ) +
   theme(legend.position = "none")
 ```
@@ -289,7 +290,7 @@ for (i in 1:n) {
   yi  <- Y_train[i, ]
   ti  <- round(Y_train_age[i, ], 2)
   
-  keep <- !is.na(yi) & !is.na(ti)
+  keep <- !is.na(yi) & !is.na(ti) & ti <= 15
   
   Ly_train[[i]] <- yi[keep]
   Lt_train[[i]] <- ti[keep]
@@ -307,7 +308,7 @@ fit_mu_ng <- ConvertSupport(fromGrid = fpca_train$workGrid, toGrid = time, mu = 
 ```{r}
 plot(fpca_train)
 FPC_dat <- fpca_train$xiEst
-colnames(FPC_dat) <- c("FPC1", "FPC2", "FPC3")
+colnames(FPC_dat) <- c("FPC1", "FPC2", "FPC3", "FPC4")
 plot(FPC2~FPC1, FPC_dat)
 ```
 

@@ -66,12 +66,12 @@ ui <- fluidPage(
     tags$p("We have options to vary number of subjects and time points. As you know from Stats 101, more 
     people and time points lead to better estimation of the covariance matrix. That is true here too. However,
     the maximum possible values here are set to reasonable values to ensure the app does not crash. Further, 
-    when computing FPCA please set smaller values for time points to enable faster computation."),
+    when computing FPCA please set smaller values (<50) for time points to enable faster computation and to avoid crashes."),
     
     tags$p("There are buttons for each element of the data generating model. Feel free to make changes and explore on 
     your own. I would encourage you to change f(t) and measurement error variance and see how that affects the 
     estimation of f(t). Here is an fun activity. Plot the covariance surface with Noise SD = .5, and then plot 
-    the same with Noie SD = 1. Can you explain why this happens?"),
+    the same with Noise SD = 1. Can you explain why this happens?"),
     
     tags$p("When changing the f(t), please use 'time' and not 't'. For example, if you want f(t) = 
     sin(t), you should write sin(time) in the 'f(time) =' box. Most of the functions you use will probably not be 

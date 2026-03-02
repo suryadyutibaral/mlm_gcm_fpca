@@ -5,7 +5,7 @@ account: baral-suryadyuti
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 16775886
-bundleId: 11636318
+bundleId: 11645507
 url: https://baral-suryadyuti.shinyapps.io/covariance_explorer/
 version: 1
 asMultiple: FALSE
