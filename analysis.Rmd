@@ -449,7 +449,7 @@ mc_results_northo <- future_map_dfr(
   .options = furrr_options(seed = NULL)
 )
 
-mc_results_northo$n100_tp12_cor0_eps0.25
+#mc_results_northo$n100_tp12_cor0_eps0.25
 ```
 
 ```{r}
