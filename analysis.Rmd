@@ -48,7 +48,7 @@ conditions <- expand_grid(
     )
   )
 
-n_mc <- 500
+n_mc <- 100
 
 mc_results <- future_map_dfr(
   1:n_mc,
@@ -126,9 +126,9 @@ summary_df
 plot_simulation_metric(
   summary_df = summary_df,
   n_mc = n_mc,
-  metric = "cfi",
-  abline_value = 0.95,
-  main_title = "Monte Carlo Performance: CFI"
+  metric = "rmsea",
+  abline_value = 0.05,
+  main_title = "Monte Carlo Performance: rmsea"
 )
 ```
 
@@ -138,7 +138,27 @@ plot_simulation_metric(
 ```{r message=FALSE, warning=FALSE}
 begin <- Sys.time()
 
-n_mc <- 500
+n_vals   <- c(100, 200, 500)
+tp_vals  <- c(12, 30)
+cor_vals <- c(0, 0.3, 0.8)
+eps_vals <- c(.25, .5, 1)
+
+conditions <- expand_grid(
+  n_subj      = n_vals,
+  time_points = tp_vals,
+  cor_ss      = cor_vals,
+  sig_eps   = eps_vals
+) %>%
+  mutate(
+    cond_name = paste0(
+      "n", n_subj,
+      "_tp", time_points,
+      "_cor", cor_ss,
+      "_eps", sig_eps
+    )
+  )
+
+n_mc <- 100
 
 mc_results_np <- future_map_dfr(
   1:n_mc,
@@ -257,7 +277,27 @@ plot_aligned_efunctions(list_best_cond, f1_t, f2_t, n_mc, T_grid = time)
 ```{r message=FALSE, warning=FALSE}
 begin <- Sys.time()
 
-n_mc <- 500
+n_vals   <- c(100, 200, 500)
+tp_vals  <- c(12, 30)
+cor_vals <- c(0, 0.3, 0.8)
+eps_vals <- c(.25, .5, 1)
+
+conditions <- expand_grid(
+  n_subj      = n_vals,
+  time_points = tp_vals,
+  cor_ss      = cor_vals,
+  sig_eps   = eps_vals
+) %>%
+  mutate(
+    cond_name = paste0(
+      "n", n_subj,
+      "_tp", time_points,
+      "_cor", cor_ss,
+      "_eps", sig_eps
+    )
+  )
+
+n_mc <- 100
 
 mc_results_lb <- future_map_dfr(
   1:n_mc,

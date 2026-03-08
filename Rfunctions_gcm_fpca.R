@@ -165,12 +165,12 @@ run_mc <- function(iter, n, time_points, cor_ss, sigma_eps, f1_t, f2_t){
   missingness <- .3
 
   # ----- Fixed effects -----
-  beta_s <- 0
-  beta_s2 <- 0
+  beta_s <- 1
+  beta_s2 <- 1
 
   # ----- Random effects -----
   sigma_s <- 1
-  sigma_s2 <- 1
+  sigma_s2 <- sqrt(2)
   rho_ss2 <- cor_ss
 
   Sigma <- matrix(c(sigma_s^2, rho_ss2 * sigma_s * sigma_s2,
@@ -250,9 +250,10 @@ run_mc <- function(iter, n, time_points, cor_ss, sigma_eps, f1_t, f2_t){
 
   pe_vals <- f$pe %>%
     filter(label %in% c("var_eta1","var_eta2","cov_sl","mu1","mu2")) %>%
-    pull(est)
+    pull(est) %>%
+    abs()
   
-  names(pe_vals) <- c("var_eta1","var_eta2","cov_sl","mu1","mu2")
+  names(pe_vals) <- c("var_eta1","var_eta2","abs_cov_sl","mu1","mu2")
 
   vare_mean <- mean(f$pe[f$pe$label == "vare","est"])
   
@@ -275,12 +276,12 @@ run_mc_lb <- function(iter, n, time_points, cor_ss, sigma_eps, f1_t, f2_t){
   missingness <- .3
   
   # ----- Fixed effects -----
-  beta_s <- 0
-  beta_s2 <- 0
+  beta_s <- 1
+  beta_s2 <- 1
   
   # ----- Random effects -----
   sigma_s <- 1
-  sigma_s2 <- 1
+  sigma_s2 <- sqrt(2)
   rho_ss2 <- cor_ss
   
   Sigma <- matrix(c(sigma_s^2, rho_ss2 * sigma_s * sigma_s2,
@@ -387,9 +388,10 @@ run_mc_lb <- function(iter, n, time_points, cor_ss, sigma_eps, f1_t, f2_t){
   # Extract parameters
   pe_vals <- f$pe %>%
     dplyr::filter(label %in% c("var_eta1","var_eta2","cov_sl","mu1","mu2")) %>%
-    dplyr::pull(est)
+    dplyr::pull(est) %>%
+    abs()
   
-  names(pe_vals) <- c("var_eta1","var_eta2","cov_sl","mu1","mu2")
+  names(pe_vals) <- c("var_eta1","var_eta2","abs_cov_sl","mu1","mu2")
   
   vare_mean <- mean(f$pe[f$pe$label == "vare","est"])
   names(vare_mean) <- "vare"

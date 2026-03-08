@@ -56,15 +56,15 @@ f2_t <- fit_ng_ht[,2]
 # The Rest
 ```{r}
 n_time <- length(time)
-missingness = .2
+missingness = .3
 
 # ----- fixed effects -----
-beta_s <- 0
-beta_s2 <- 0
+beta_s <- 1
+beta_s2 <- 1
 
 # ----- Random effects -----
 sigma_s <- 1   # SD of random slope
-sigma_s2 <- 1  # SD of random slope for quadratic slope
+sigma_s2 <- sqrt(2)  # SD of random slope for quadratic slope
 
 Sigma <- matrix(c(sigma_s^2, rho_ss2 * sigma_s * sigma_s2,
                   rho_ss2 * sigma_s * sigma_s2, sigma_s2^2), 2, 2)
@@ -97,7 +97,7 @@ Y_quad <- Y_quad_split$train
 
 ```{r}
 set.seed(123)
-n_sample <- 50
+n_sample <- 10
 sample_ids <- sample(1:nrow(Y_quad), n_sample)
 
 # Convert to data frame for ggplot
