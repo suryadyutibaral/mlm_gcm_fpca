@@ -48,7 +48,7 @@ conditions <- expand_grid(
     )
   )
 
-n_mc <- 100
+n_mc <- 500
 
 mc_results <- future_map_dfr(
   1:n_mc,
@@ -158,7 +158,7 @@ conditions <- expand_grid(
     )
   )
 
-n_mc <- 100
+n_mc <- 500
 
 mc_results_np <- future_map_dfr(
   1:n_mc,
@@ -243,9 +243,9 @@ summary_df
 plot_simulation_metric(
   summary_df = summary_df,
   n_mc = n_mc,
-  metric = "rmsea",
-  abline_value = 0.08,
-  main_title = "Monte Carlo Performance: RMSEA"
+  metric = "ise_f2",
+  abline_value = NULL,
+  main_title = "Monte Carlo Performance: ISE F1"
 )
 ```
 ```{r}
@@ -297,7 +297,7 @@ conditions <- expand_grid(
     )
   )
 
-n_mc <- 100
+n_mc <- 500
 
 mc_results_lb <- future_map_dfr(
   1:n_mc,
