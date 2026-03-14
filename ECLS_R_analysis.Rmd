@@ -17,7 +17,7 @@ library(lme4)
 library(MASS)
 source("Rfunctions_gcm_fpca.R")
 
-load("C://Users//sonnet//Downloads//edudat//ECLSK_98_99_K8_CHILD_v1_0.rdata")
+load("C:/Users/surya/Box/class/STA250/edudat/ECLSK_98_99_K8_CHILD_v1_0.rdata")
 ecls <- ECLSK_98_99_K8_CHILD_v1_0
 ```
 
@@ -35,6 +35,7 @@ Y <- as.matrix(ecls_r[,-1])
 set.seed(123)
 Y_split <- train_test_split(Y) 
 Y_train <- Y_split$train
+Y_test <- Y_split$test
 ```
 
 ```{r}
@@ -80,15 +81,21 @@ fit_ng <- ConvertSupport(fromGrid = fpca_train$workGrid,
                                       toGrid = time,
                                       phi = fpca_train$phi)
 
-fit_mu_ng <- ConvertSupport(fromGrid = fpca_train$workGrid,
-                                      toGrid = time,
-                                      mu = fpca_train$mu)
-
 plot(fpca_train)
 FPC_dat <- fpca_train$xiEst
 colnames(FPC_dat) <- c("FPC1", "FPC2")
 plot(FPC2~FPC1, FPC_dat)
 ```
+```{r}
+Ly_test <- lapply(seq_len(nrow(Y_test)), function(i) Y_test[i,])
+Lt_test <- lapply(seq_len(nrow(Y_test)), function(i) time)
+
+fpca_test <- FPCA(Ly_test, Lt_test, optns = list(methodMuCovEst = "smooth"))
+fit_mu_ng <- ConvertSupport(fromGrid = fpca_test$workGrid,
+                                      toGrid = time,
+                                      mu = fpca_test$mu)
+```
+
 ```{r}
 age_grid <- fpca_train$workGrid
 
@@ -277,6 +284,9 @@ set.seed(123)
 Y_split <- train_test_split(Y)
 Y_train <- Y_split$train
 Y_train_age <- Y_age[Y_split$train_idx,]
+
+Y_test <- Y_split$test
+Y_test_age <- Y_age[Y_split$test_idx,]
 ```
 
 ```{r}
@@ -300,8 +310,29 @@ fpca_train <- FPCA(Ly_train, Lt_train)
 
 time <- seq(4.5, 15, by = .1)
 fit_ng <- ConvertSupport(fromGrid = fpca_train$workGrid, toGrid = time, phi = fpca_train$phi)
+```
 
-fit_mu_ng <- ConvertSupport(fromGrid = fpca_train$workGrid, toGrid = time, mu = fpca_train$mu)
+```{r}
+n_tt <- nrow(Y_test)
+
+Ly_test <- vector("list", n_tt)
+Lt_test <- vector("list", n_tt)
+
+for (i in 1:n_tt) {
+  
+  yi  <- Y_test[i, ]
+  ti  <- round(Y_test_age[i, ], 2)
+  
+  keep <- !is.na(yi) & !is.na(ti) & ti <= 15.5
+  
+  Ly_test[[i]] <- yi[keep]
+  Lt_test[[i]] <- ti[keep]
+}
+
+fpca_test <- FPCA(Ly_test, Lt_test)
+
+time <- seq(4.5, 15, by = .1)
+fit_mu_ng <- ConvertSupport(fromGrid = fpca_test$workGrid, toGrid = time, mu = fpca_test$mu)
 ```
 
 
@@ -339,16 +370,14 @@ dat_long$f2 <- rep(fit_ng[,2], n)
 dat_long$f3 <- rep(fit_ng[,3], n)
 dat_long$mu <- rep(fit_mu_ng, n)
 
-dat_long$y <- dat_long$score - dat_long$mu
-
 fit_lmer2 <- lmer(
-  y ~ f1 + f2 + (f1 + f2 | id),
+  score ~ offset(mu) + f1 + f2 + (0 + f1 + f2 | id),
   data = dat_long,
   REML = TRUE
 )
 
 fit_lmer1 <- lmer(
-  y ~ f1 + (f1 | id),
+  score ~ offset(mu) + f1 + (0 + f1 | id),
   data = dat_long,
   REML = TRUE
 )
@@ -411,3 +440,20 @@ ggplot(plot_df, aes(x = age, y = value, color = Curve)) +
   )
 ```
 
+```{r}
+fit_param <- lmer(
+  score ~ offset(mu) + 1 + (1/(1 + exp(-scale(age)+1))) + (1 + (1/(1 + exp(-scale(age)+1))) | id),
+  data = dat_long,
+  REML = TRUE
+)
+BIC(fit_param)
+
+fit_param2 <- lmer(
+  score ~ offset(mu) + 1 + exp(-scale(age)) + (1 + exp(-scale(age)) | id),
+  data = dat_long,
+  REML = TRUE
+)
+BIC(fit_param2)
+
+BIC(fit_lmer2)
+```

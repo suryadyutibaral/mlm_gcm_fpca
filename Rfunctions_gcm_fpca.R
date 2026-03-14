@@ -520,10 +520,12 @@ get_metric <- function(cond_name, summary_df, n_mc, metric) {
 }
 
 plot_simulation_metric <- function(summary_df,
-                                      n_mc,
-                                      metric,
-                                      abline_value = NULL,
-                                      main_title = NULL) {
+                                   n_mc,
+                                   metric,
+                                   abline_value = NULL,
+                                   main_title = NULL,
+                                   fix_y = FALSE, 
+                                   pad = .01) {
   
   get_metric_vals <- function(cond_name) {
     
@@ -547,7 +549,6 @@ plot_simulation_metric <- function(summary_df,
     )
   }
   
-  ### Define conditions
   panels <- list(
     n = list(
       conds = c(
@@ -589,7 +590,6 @@ plot_simulation_metric <- function(summary_df,
     )
   )
   
-  ### Build long dataframe
   plot_df <- bind_rows(lapply(names(panels), function(p) {
     
     panel_info <- panels[[p]]
@@ -601,12 +601,11 @@ plot_simulation_metric <- function(summary_df,
     df
   }))
   
-  ### Nice color palette
   palette_cols <- c(
-    "#0072B2",  # blue
-    "#D55E00",  # orange
-    "#009E73",  # green
-    "#CC79A7"   # purple
+    "#0072B2",
+    "#D55E00",
+    "#009E73",
+    "#CC79A7"
   )
   
   p <- ggplot(plot_df,
@@ -641,9 +640,28 @@ plot_simulation_metric <- function(summary_df,
     )
   
   if (!is.null(abline_value)) {
-    p <- p + geom_hline(yintercept = abline_value,
-                        linetype = "dashed",
-                        size = 1)
+    p <- p + geom_hline(
+      yintercept = abline_value,
+      linetype = "dashed",
+      size = 1
+    )
+  }
+  
+  if (fix_y) {
+    
+    ymin <- min(plot_df$lower, na.rm = TRUE)
+    ymax <- max(plot_df$upper, na.rm = TRUE)
+    
+    if (!is.null(abline_value)) {
+      ymin <- min(ymin, abline_value)
+      ymax <- max(ymax, abline_value)
+    }
+    
+    padding <- pad*(ymax - ymin)
+    
+    p <- p + coord_cartesian(
+      ylim = c(ymin - padding, ymax + padding)
+    )
   }
   
   return(p)

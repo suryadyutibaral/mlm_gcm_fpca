@@ -126,9 +126,9 @@ summary_df
 plot_simulation_metric(
   summary_df = summary_df,
   n_mc = n_mc,
-  metric = "rmsea",
-  abline_value = 0.05,
-  main_title = "Monte Carlo Performance: rmsea"
+  metric = "ise_f1",
+  abline_value = NULL,
+  main_title = "Monte Carlo Performance: ISE"
 )
 ```
 
@@ -243,7 +243,7 @@ summary_df
 plot_simulation_metric(
   summary_df = summary_df,
   n_mc = n_mc,
-  metric = "ise_f2",
+  metric = "ise_f1",
   abline_value = NULL,
   main_title = "Monte Carlo Performance: ISE F1"
 )
@@ -381,10 +381,10 @@ plot_simulation_metric2(
   summary_df1 = summary_df1,
   summary_df2 = summary_df2,
   n_mc = n_mc,
-  metric = "bic",
+  metric = "ise_f2",
   labels = c("FPCA", "Latent Basis"),
   abline_value = NULL,
-  main_title = "Monte Carlo Performance: BIC"
+  main_title = "Monte Carlo Performance: ISE"
 )
 ```
 
@@ -492,9 +492,11 @@ summary_df
 plot_simulation_metric(
   summary_df = summary_df,
   n_mc = n_mc,
-  metric = "rmsea",
-  abline_value = 0.08,
-  main_title = "Monte Carlo Performance: RMSEA"
+  metric = "var_eta1",
+  abline_value = 17/24,
+  main_title = "Monte Carlo Performance: 
+  Variance of first random effect",
+  fix_y = TRUE, pad = 1
 )
 ```
 
